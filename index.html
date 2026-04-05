@@ -40,6 +40,10 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
 .task-chip.done .chip-check::after{content:'';display:block;width:3px;height:5px;border:1.5px solid #fff;border-top:none;border-left:none;transform:rotate(45deg) translateY(-1px)}
 .chip-label{font-size:12px;color:#1a1a1a;white-space:nowrap}
 .task-chip.done .chip-label{text-decoration:line-through;color:#999}
+.task-chip.urgent .chip-label{color:#1a1a1a;font-weight:500}
+.task-chip.urgent{border-color:#aaa}
+.task-chip.future .chip-label{color:#E8846A}
+.task-chip.future{border-color:#F5C4B3}
 .overflow-badge{flex-shrink:0;font-size:11px;padding:3px 8px;border-radius:6px;background:#f5f5f5;color:#666;cursor:pointer;border:0.5px solid #e0e0e0;white-space:nowrap}
 .overflow-badge:hover{background:#e8e8e8}
 .goal-pill{font-size:10px;padding:2px 7px;border-radius:6px;background:#E6F1FB;color:#0C447C;white-space:nowrap;display:inline-block;margin-left:4px}
@@ -60,6 +64,9 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
 .popover-add button{font-size:11px;padding:4px 8px;border-radius:6px;border:0.5px solid #ccc;background:transparent;color:#1a1a1a;cursor:pointer}
 .popover-add button:hover{background:#f5f5f5}
 .save-indicator{font-size:11px;color:#aaa;margin-left:8px;transition:opacity .3s}
+.export-btn{font-size:12px;padding:4px 12px;border-radius:6px;border:0.5px solid #ccc;background:transparent;color:#666;cursor:pointer;margin-left:4px}
+.export-btn:hover{background:#f5f5f5;color:#1a1a1a}
+.export-toast{font-size:11px;color:#1D9E75;margin-left:6px;transition:opacity .3s}
 </style>
 </head>
 <body>
@@ -67,6 +74,8 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
   <div class="topbar">
     <h1>OS Projects</h1>
     <span class="save-indicator" id="save-indicator"></span>
+    <button class="export-btn" onclick="exportNowTasks()">Export “now” tasks</button>
+    <span class="export-toast" id="export-toast" style="opacity:0">Downloaded!</span>
     <div class="phase-tabs" id="phase-tabs"></div>
   </div>
   <div class="metrics" id="metrics"></div>
@@ -257,9 +266,12 @@ function renderTable(){
       wrap.id=`row-${topic.id}-${sub.id}`;
       sub.tasks.forEach(t=>{
         const chip=document.createElement('div');
-        chip.className='task-chip'+(t.done?' done':'');
+        const pClass=t.done?' done':t.priority==='urgent'?' urgent':t.priority==='future'?' future':'';
+        chip.className='task-chip'+pClass;
         chip.innerHTML=`<div class="chip-check"></div><span class="chip-label">${t.text}</span>`;
         chip.onclick=()=>toggleTask(topic.id,sub.id,t.id);
+        chip.oncontextmenu=(e)=>{e.preventDefault();cyclePriority(topic.id,sub.id,t.id);};
+        chip.title='Right-click to set priority';
         wrap.appendChild(chip);
       });
       const addBtn=document.createElement('div');
@@ -326,9 +338,13 @@ function showPopover(e,tid,sid){
   sub.tasks.forEach(t=>{
     const row=document.createElement('div');
     row.className='popover-task';
+    const pColor=t.priority==='urgent'?'#1a1a1a':t.priority==='future'?'#E8846A':'#1a1a1a';
+    const pLabel=t.priority==='urgent'?' ●':t.priority==='future'?' ○':'';
     row.innerHTML=`<div style="width:14px;height:14px;border-radius:50%;border:1.5px solid #ccc;flex-shrink:0;display:flex;align-items:center;justify-content:center;${t.done?'background:#1D9E75;border-color:#1D9E75':''}"></div>
-      <span style="font-size:12px;${t.done?'text-decoration:line-through;color:#999':'color:#1a1a1a'}">${t.text}</span>`;
+      <span style="font-size:12px;flex:1;${t.done?'text-decoration:line-through;color:#999':('color:'+pColor)}">${t.text}</span>
+      <span style="font-size:10px;color:${t.priority==='future'?'#E8846A':'#aaa'};cursor:pointer;flex-shrink:0" title="Right-click chip or click here to cycle priority">${t.priority==='urgent'?'now':t.priority==='future'?'later':''}</span>`;
     row.onclick=()=>{toggleTask(tid,sid,t.id);showPopover(e,tid,sid);};
+    row.oncontextmenu=(ev)=>{ev.preventDefault();cyclePriority(tid,sid,t.id);showPopover(e,tid,sid);};
     pop.appendChild(row);
   });
   const addRow=document.createElement('div');
@@ -370,6 +386,18 @@ function toggleTask(tid,sid,taskId){
   renderTable();
 }
 
+function cyclePriority(tid,sid,taskId){
+  const t=phases[currentPhase].topics.find(x=>x.id===tid);
+  const s=t&&t.subjects.find(x=>x.id===sid);
+  const tk=s&&s.tasks.find(x=>x.id===taskId);
+  if(!tk) return;
+  const order=[undefined,"urgent","future"];
+  const idx=order.indexOf(tk.priority);
+  tk.priority=order[(idx+1)%3];
+  saveData();
+  renderTable();
+}
+
 function addTopic(){
   const tInp=document.getElementById('new-topic-inp');
   const sInp=document.getElementById('new-subj-inp');
@@ -381,6 +409,71 @@ function addTopic(){
   renderTable();
 }
 
+function exportNowTasks(){
+  const allNow=[];
+  Object.entries(phases).forEach(([phaseKey,ph])=>{
+    ph.topics.forEach(topic=>{
+      topic.subjects.forEach(sub=>{
+        sub.tasks.filter(t=>t.priority==='urgent'&&!t.done).forEach(t=>{
+          allNow.push({text:t.text,topic:topic.name,subject:sub.name,phase:ph.label});
+        });
+      });
+    });
+  });
+
+  if(allNow.length===0){
+    alert('No tasks marked as 'now' found across all phases.');
+    return;
+  }
+
+  const now=new Date();
+  const stamp=now.toISOString().replace(/[-:.]/g,'').slice(0,15)+'Z';
+  const due=new Date(now);
+  due.setDate(due.getDate()+14);
+  const dueStr=due.toISOString().slice(0,10).replace(/-/g,'');
+
+  let ics='BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//OS Projects//EN
+CALSCALE:GREGORIAN
+';
+  allNow.forEach((t,i)=>{
+    const uid='osprojekt-'+stamp+'-'+i+'@osprojects';
+    ics+='BEGIN:VTODO
+';
+    ics+='UID:'+uid+'
+';
+    ics+='DTSTAMP:'+stamp+'
+';
+    ics+='SUMMARY:'+t.text.replace(/,/g,'\,')+'
+';
+    ics+='DESCRIPTION:'+t.phase+' → '+t.topic+' → '+t.subject+'
+';
+    ics+='DUE;VALUE=DATE:'+dueStr+'
+';
+    ics+='PRIORITY:1
+';
+    ics+='STATUS:NEEDS-ACTION
+';
+    ics+='END:VTODO
+';
+  });
+  ics+='END:VCALENDAR';
+
+  const blob=new Blob([ics],{type:'text/calendar;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='os-projects-now-tasks.ics';
+  a.click();
+  URL.revokeObjectURL(url);
+
+  const toast=document.getElementById('export-toast');
+  toast.style.opacity='1';
+  clearTimeout(toast._t);
+  toast._t=setTimeout(()=>{toast.style.opacity='0';},2000);
+}
+
 function setPhase(p){currentPhase=p;closePopover();renderTabs();renderTable();}
 
 window.addEventListener('resize',()=>requestAnimationFrame(applyOverflow));
@@ -389,3 +482,4 @@ renderTable();
 </script>
 </body>
 </html>
+
