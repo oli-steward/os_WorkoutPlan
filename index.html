@@ -200,8 +200,28 @@ const defaultData={
 function loadData(){
   try{
     const saved=localStorage.getItem(LS_KEY);
-    if(saved) return JSON.parse(saved);
-  }catch(e){}
+    if(saved){
+      const parsed=JSON.parse(saved);
+      Object.keys(defaultData).forEach(phKey=>{
+        if(!parsed[phKey]) parsed[phKey]=JSON.parse(JSON.stringify(defaultData[phKey]));
+        else{
+          parsed[phKey].label=parsed[phKey].label||defaultData[phKey].label;
+          if(!parsed[phKey].topics||parsed[phKey].topics.length===0){
+            parsed[phKey].topics=JSON.parse(JSON.stringify(defaultData[phKey].topics));
+          } else {
+            parsed[phKey].topics.forEach(topic=>{
+              topic.subjects.forEach(sub=>{
+                sub.tasks.forEach(t=>{
+                  if(t.priority===undefined) t.priority=undefined;
+                });
+              });
+            });
+          }
+        }
+      });
+      return parsed;
+    }
+  }catch(e){console.warn('loadData error',e);}
   return JSON.parse(JSON.stringify(defaultData));
 }
 
@@ -422,7 +442,7 @@ function exportNowTasks(){
   });
 
   if(allNow.length===0){
-    alert('No tasks marked as 'now' found across all phases.');
+    alert("No tasks marked as 'now' found across all phases.");
     return;
   }
 
@@ -432,31 +452,19 @@ function exportNowTasks(){
   due.setDate(due.getDate()+14);
   const dueStr=due.toISOString().slice(0,10).replace(/-/g,'');
 
-  let ics='BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//OS Projects//EN
-CALSCALE:GREGORIAN
-';
+  const CRLF='\r\n';
+  let ics='BEGIN:VCALENDAR'+CRLF+'VERSION:2.0'+CRLF+'PRODID:-//OS Projects//EN'+CRLF+'CALSCALE:GREGORIAN'+CRLF;
   allNow.forEach((t,i)=>{
     const uid='osprojekt-'+stamp+'-'+i+'@osprojects';
-    ics+='BEGIN:VTODO
-';
-    ics+='UID:'+uid+'
-';
-    ics+='DTSTAMP:'+stamp+'
-';
-    ics+='SUMMARY:'+t.text.replace(/,/g,'\,')+'
-';
-    ics+='DESCRIPTION:'+t.phase+' → '+t.topic+' → '+t.subject+'
-';
-    ics+='DUE;VALUE=DATE:'+dueStr+'
-';
-    ics+='PRIORITY:1
-';
-    ics+='STATUS:NEEDS-ACTION
-';
-    ics+='END:VTODO
-';
+    ics+='BEGIN:VTODO'+CRLF;
+    ics+='UID:'+uid+CRLF;
+    ics+='DTSTAMP:'+stamp+CRLF;
+    ics+='SUMMARY:'+t.text+CRLF;
+    ics+='DESCRIPTION:'+t.phase+' > '+t.topic+' > '+t.subject+CRLF;
+    ics+='DUE;VALUE=DATE:'+dueStr+CRLF;
+    ics+='PRIORITY:1'+CRLF;
+    ics+='STATUS:NEEDS-ACTION'+CRLF;
+    ics+='END:VTODO'+CRLF;
   });
   ics+='END:VCALENDAR';
 
@@ -482,4 +490,3 @@ renderTable();
 </script>
 </body>
 </html>
-
