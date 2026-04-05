@@ -75,6 +75,7 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
     <h1>OS Projects</h1>
     <span class="save-indicator" id="save-indicator"></span>
     <button class="export-btn" onclick="exportNowTasks()">Export “now” tasks</button>
+    <button class="export-btn" onclick="forceReset()" style="color:#c0392b;border-color:#c0392b" title="Reload all default data">Reset data</button>
     <span class="export-toast" id="export-toast" style="opacity:0">Downloaded!</span>
     <div class="phase-tabs" id="phase-tabs"></div>
   </div>
@@ -202,12 +203,18 @@ function loadData(){
     const saved=localStorage.getItem(LS_KEY);
     if(saved){
       const parsed=JSON.parse(saved);
-      const hasData=Object.keys(defaultData).some(k=>parsed[k]&&parsed[k].topics&&parsed[k].topics.length>0);
+      const hasData=Object.keys(defaultData).some(k=>
+        parsed[k]&&parsed[k].topics&&parsed[k].topics.length>0
+      );
       if(hasData) return parsed;
     }
-  }catch(e){console.warn('loadData error',e);}
+  }catch(e){}
+  return resetToDefault();
+}
+
+function resetToDefault(){
   const fresh=JSON.parse(JSON.stringify(defaultData));
-  localStorage.setItem(LS_KEY,JSON.stringify(fresh));
+  try{localStorage.setItem(LS_KEY,JSON.stringify(fresh));}catch(e){}
   return fresh;
 }
 
@@ -466,6 +473,13 @@ function exportNowTasks(){
   toast.style.opacity='1';
   clearTimeout(toast._t);
   toast._t=setTimeout(()=>{toast.style.opacity='0';},2000);
+}
+
+function forceReset(){
+  if(!confirm('This will reload all default topics and tasks. Continue?')) return;
+  phases=resetToDefault();
+  renderTabs();
+  renderTable();
 }
 
 function setPhase(p){currentPhase=p;closePopover();renderTabs();renderTable();}
