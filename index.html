@@ -202,27 +202,13 @@ function loadData(){
     const saved=localStorage.getItem(LS_KEY);
     if(saved){
       const parsed=JSON.parse(saved);
-      Object.keys(defaultData).forEach(phKey=>{
-        if(!parsed[phKey]) parsed[phKey]=JSON.parse(JSON.stringify(defaultData[phKey]));
-        else{
-          parsed[phKey].label=parsed[phKey].label||defaultData[phKey].label;
-          if(!parsed[phKey].topics||parsed[phKey].topics.length===0){
-            parsed[phKey].topics=JSON.parse(JSON.stringify(defaultData[phKey].topics));
-          } else {
-            parsed[phKey].topics.forEach(topic=>{
-              topic.subjects.forEach(sub=>{
-                sub.tasks.forEach(t=>{
-                  if(t.priority===undefined) t.priority=undefined;
-                });
-              });
-            });
-          }
-        }
-      });
-      return parsed;
+      const hasData=Object.keys(defaultData).some(k=>parsed[k]&&parsed[k].topics&&parsed[k].topics.length>0);
+      if(hasData) return parsed;
     }
   }catch(e){console.warn('loadData error',e);}
-  return JSON.parse(JSON.stringify(defaultData));
+  const fresh=JSON.parse(JSON.stringify(defaultData));
+  localStorage.setItem(LS_KEY,JSON.stringify(fresh));
+  return fresh;
 }
 
 let phases=loadData();
