@@ -74,6 +74,9 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
   <div class="topbar">
     <h1>OS Projects</h1>
     <span class="save-indicator" id="save-indicator"></span>
+    <button class="export-btn" onclick="syncFromGSheets()">Sync Google Sheet</button>
+    <button class="export-btn" onclick="document.getElementById('xlsx-input').click()">Import Excel</button>
+    <input type="file" id="xlsx-input" accept=".xlsx" style="display:none" onchange="importXlsx(this)">
     <button class="export-btn" onclick="exportNowTasks()">Export “now” tasks</button>
     <button class="export-btn" onclick="forceReset()" style="color:#c0392b;border-color:#c0392b" title="Reload all default data">Reset data</button>
     <span class="export-toast" id="export-toast" style="opacity:0">Downloaded!</span>
@@ -488,5 +491,146 @@ window.addEventListener('resize',()=>requestAnimationFrame(applyOverflow));
 renderTabs();
 renderTable();
 </script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+function importXlsx(input){
+  const file=input.files[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array'});
+      const phaseMap={'Projects PH2':'PH2','Projects PH3':'PH3','Projects PH4':'PH4'};
+      let imported=0;
+
+      wb.SheetNames.forEach(sheetName=>{
+        const phKey=phaseMap[sheetName];
+        if(!phKey) return;
+        const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:''});
+        if(!rows||rows.length<2) return;
+
+        const parsed=parseSheet(rows);
+        if(!phases[phKey]) phases[phKey]={label:sheetName,topics:[]};
+        mergePhase(phases[phKey],parsed);
+        imported++;
+      });
+
+      if(imported===0){alert('No matching sheets found. Make sure your sheets are named: Projects PH2, Projects PH3, Projects PH4');return;}
+      saveData();
+      renderTabs();
+      renderTable();
+      const toast=document.getElementById('export-toast');
+      toast.textContent='Imported!';
+      toast.style.opacity='1';
+      clearTimeout(toast._t);
+      toast._t=setTimeout(()=>{toast.style.opacity='0';toast.textContent='Downloaded!';},2500);
+    }catch(err){
+      alert('Import error: '+err.message);
+      console.error(err);
+    }
+    input.value='';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function parseSheet(rows){
+  const topics=[];
+  let currentTopic=null;
+  let topicId=1000;
+  let subjectId=1000;
+
+  for(let i=1;i<rows.length;i++){
+    const row=rows[i];
+    const col0=String(row[0]||'').trim();
+    const col1=String(row[1]||'').trim();
+    const col2=String(row[2]||'').trim();
+
+    if(!col0&&!col1&&!col2) continue;
+
+    if(col0&&col0!=='->'&&!col0.startsWith('->')){
+      currentTopic={id:topicId++,name:col0,color:COLORS[topics.length%COLORS.length],subjects:[]};
+      topics.push(currentTopic);
+    }
+
+    if(col1&&currentTopic){
+      const tasks=[];
+      for(let c=2;c<row.length;c++){
+        const cell=String(row[c]||'').trim();
+        if(cell&&cell.startsWith('-')){
+          tasks.push(cell.replace(/^-\s*/,'').trim());
+        }
+      }
+      if(col2&&col2.startsWith('-')) tasks.push(col2.replace(/^-\s*/,'').trim());
+      currentTopic.subjects.push({id:subjectId++,name:col1,goal:'',tasks});
+    }
+  }
+  return topics;
+}
+
+function mergePhase(phase, newTopics){
+  newTopics.forEach(newTopic=>{
+    const existing=phase.topics.find(t=>t.name.toLowerCase()===newTopic.name.toLowerCase());
+    if(!existing){
+      phase.topics.push(newTopic);
+    } else {
+      newTopic.subjects.forEach(newSub=>{
+        const exSub=existing.subjects.find(s=>s.name.toLowerCase()===newSub.name.toLowerCase());
+        if(!exSub){
+          existing.subjects.push({id:newSub.id,name:newSub.name,goal:newSub.goal,tasks:newSub.tasks.map((t,i)=>({id:i+1,text:t,done:false,priority:undefined}))});
+        } else {
+          newSub.tasks.forEach(taskText=>{
+            const exTask=exSub.tasks.find(t=>t.text.toLowerCase()===taskText.toLowerCase());
+            if(!exTask){
+              const maxId=exSub.tasks.reduce((a,t)=>Math.max(a,t.id),0);
+              exSub.tasks.push({id:maxId+1,text:taskText,done:false,priority:undefined});
+            }
+          });
+        }
+      });
+    }
+  });
+}
+
+function syncFromGSheets(){
+  const url='https://docs.google.com/spreadsheets/d/1UpnrOrUUnNAUhWhkDFJhNJFmfR2985p7XrIO7VqE72g/export?format=xlsx';
+  const toast=document.getElementById('export-toast');
+  toast.textContent='Syncing...';
+  toast.style.opacity='1';
+
+  fetch(url)
+    .then(r=>{
+      if(!r.ok) throw new Error('Could not fetch sheet. Make sure it is publicly shared.');
+      return r.arrayBuffer();
+    })
+    .then(buf=>{
+      const wb=XLSX.read(buf,{type:'array'});
+      const phaseMap={'Projects PH2':'PH2','Projects PH3':'PH3','Projects PH4':'PH4'};
+      let imported=0;
+      wb.SheetNames.forEach(sheetName=>{
+        const phKey=phaseMap[sheetName];
+        if(!phKey) return;
+        const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:''});
+        if(!rows||rows.length<2) return;
+        const parsed=parseSheet(rows);
+        if(!phases[phKey]) phases[phKey]={label:sheetName,topics:[]};
+        mergePhase(phases[phKey],parsed);
+        imported++;
+      });
+      if(imported===0) throw new Error('No matching sheets found (Projects PH2/3/4/5).');
+      saveData();
+      renderTabs();
+      renderTable();
+      toast.textContent='Synced!';
+      clearTimeout(toast._t);
+      toast._t=setTimeout(()=>{toast.style.opacity='0';toast.textContent='Downloaded!';},2500);
+    })
+    .catch(err=>{
+      toast.style.opacity='0';
+      alert('Sync failed: '+err.message);
+      console.error(err);
+    });
+}
+</script>
 </body>
 </html>
+
