@@ -109,6 +109,20 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
   .task-chip{width:120px}
   .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+
+.popover-actions{display:flex;gap:4px;margin-left:auto;flex-shrink:0;opacity:0;transition:opacity .15s}
+.popover-task:hover .popover-actions{opacity:1}
+.act-btn{font-size:10px;padding:2px 6px;border-radius:4px;border:0.5px solid #ddd;background:transparent;cursor:pointer;color:#666}
+.act-btn:hover{background:#f0f0f0}
+.act-btn.del{color:#c0392b;border-color:#f5c6c6}
+.act-btn.del:hover{background:#fdf0f0}
+.inline-edit{flex:1;font-size:12px;padding:2px 6px;border-radius:4px;border:0.5px solid #ccc;background:#fff;color:#1a1a1a;outline:none}
+.topic-edit-row{display:flex;gap:6px;padding:4px 8px;border-top:0.5px solid #eee;margin-top:4px}
+.topic-edit-row input{flex:1;font-size:12px;padding:3px 7px;border-radius:4px;border:0.5px solid #ccc;background:#fff;color:#1a1a1a}
+.topic-edit-row button{font-size:11px;padding:3px 8px;border-radius:4px;border:0.5px solid #ccc;background:transparent;color:#1a1a1a;cursor:pointer}
+.topic-edit-row button:hover{background:#f5f5f5}
+.topic-edit-row button.del{color:#c0392b;border-color:#f5c6c6}
+.topic-edit-row button.del:hover{background:#fdf0f0}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -440,18 +454,36 @@ function showPopover(e,tid,sid){
   openPopover={tid,sid};
   const pop=document.getElementById('popover');
   pop.innerHTML='';
+
+  // Topic header with edit/delete
+  const topicRow=document.createElement('div');
+  topicRow.style.cssText='padding:4px 6px 6px;border-bottom:0.5px solid #eee;margin-bottom:4px';
+  topicRow.innerHTML=`<div style="font-size:11px;color:#aaa;margin-bottom:3px">Topic</div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <div style="width:8px;height:8px;border-radius:50%;background:${topic.color};flex-shrink:0"></div>
+      <span id="topic-name-display" style="font-size:13px;font-weight:500;flex:1">${topic.name}</span>
+      <button class="act-btn" onclick="startEditTopic(${tid},${sid})">Edit</button>
+      <button class="act-btn del" onclick="deleteTopic(${tid})">Delete</button>
+    </div>`;
+  pop.appendChild(topicRow);
+
+  // Tasks list
   sub.tasks.forEach(t=>{
     const row=document.createElement('div');
     row.className='popover-task';
     const pColor=t.priority==='urgent'?'#1a1a1a':t.priority==='future'?'#E8846A':'#1a1a1a';
-    const pLabel=t.priority==='urgent'?' ●':t.priority==='future'?' ○':'';
     row.innerHTML=`<div style="width:14px;height:14px;border-radius:50%;border:1.5px solid #ccc;flex-shrink:0;display:flex;align-items:center;justify-content:center;${t.done?'background:#1D9E75;border-color:#1D9E75':''}"></div>
       <span style="font-size:12px;flex:1;${t.done?'text-decoration:line-through;color:#999':('color:'+pColor)}">${t.text}</span>
-      <span style="font-size:10px;color:${t.priority==='future'?'#E8846A':'#aaa'};cursor:pointer;flex-shrink:0" title="Right-click chip or click here to cycle priority">${t.priority==='urgent'?'now':t.priority==='future'?'later':''}</span>`;
-    row.onclick=()=>{toggleTask(tid,sid,t.id);showPopover(e,tid,sid);};
+      <span style="font-size:10px;color:${t.priority==='future'?'#E8846A':'#aaa'};flex-shrink:0">${t.priority==='urgent'?'now':t.priority==='future'?'later':''}</span>
+      <div class="popover-actions">
+        <button class="act-btn" onclick="startEditTask(${tid},${sid},${t.id},this)">Edit</button>
+        <button class="act-btn del" onclick="deleteTask(${tid},${sid},${t.id})">Del</button>
+      </div>`;
+    row.onclick=(ev)=>{if(ev.target.tagName==='BUTTON'||ev.target.tagName==='INPUT') return;toggleTask(tid,sid,t.id);showPopover(e,tid,sid);};
     row.oncontextmenu=(ev)=>{ev.preventDefault();cyclePriority(tid,sid,t.id);showPopover(e,tid,sid);};
     pop.appendChild(row);
   });
+
   const addRow=document.createElement('div');
   addRow.className='popover-add';
   addRow.innerHTML=`<input id="pop-inp" placeholder="New task..." /><button onclick="commitPopoverTask(${tid},${sid})">Add</button>`;
@@ -462,6 +494,60 @@ function showPopover(e,tid,sid){
   pop.style.top=(rect.bottom+window.scrollY+4)+'px';
   pop.style.left=Math.min(rect.left,window.innerWidth-290)+'px';
   setTimeout(()=>{const i=document.getElementById('pop-inp');if(i)i.focus();},50);
+}
+
+function startEditTask(tid,sid,taskId,btn){
+  const topic=phases[currentPhase].topics.find(x=>x.id===tid);
+  const sub=topic&&topic.subjects.find(x=>x.id===sid);
+  const t=sub&&sub.tasks.find(x=>x.id===taskId);
+  if(!t) return;
+  const row=btn.closest('.popover-task');
+  const textSpan=row.querySelector('span');
+  const oldText=t.text;
+  const inp=document.createElement('input');
+  inp.className='inline-edit';
+  inp.value=oldText;
+  textSpan.replaceWith(inp);
+  btn.textContent='Save';
+  btn.onclick=()=>{
+    const val=inp.value.trim();
+    if(val){t.text=val;saveData();renderTable();}
+    btn.closest('.popover-task').querySelector('.inline-edit')?.replaceWith(Object.assign(document.createElement('span'),{textContent:t.text,style:'font-size:12px;flex:1;color:#1a1a1a'}));
+    showPopover({target:btn},tid,sid);
+  };
+  inp.onkeydown=(ev)=>{if(ev.key==='Enter') btn.click();if(ev.key==='Escape') showPopover({target:btn},tid,sid);};
+  inp.focus();
+}
+
+function deleteTask(tid,sid,taskId){
+  const topic=phases[currentPhase].topics.find(x=>x.id===tid);
+  const sub=topic&&topic.subjects.find(x=>x.id===sid);
+  if(!sub) return;
+  sub.tasks=sub.tasks.filter(x=>x.id!==taskId);
+  saveData();renderTable();
+  showPopover({target:document.body},tid,sid);
+}
+
+function startEditTopic(tid,sid){
+  const topic=phases[currentPhase].topics.find(x=>x.id===tid);
+  if(!topic) return;
+  const disp=document.getElementById('topic-name-display');
+  if(!disp) return;
+  const inp=document.createElement('input');
+  inp.className='inline-edit';
+  inp.value=topic.name;
+  disp.replaceWith(inp);
+  inp.focus();
+  inp.onkeydown=(ev)=>{
+    if(ev.key==='Enter'){topic.name=inp.value.trim()||topic.name;saveData();renderTable();showPopover({target:inp},tid,sid);}
+    if(ev.key==='Escape') showPopover({target:inp},tid,sid);
+  };
+}
+
+function deleteTopic(tid){
+  if(!confirm('Delete this topic and all its tasks?')) return;
+  phases[currentPhase].topics=phases[currentPhase].topics.filter(x=>x.id!==tid);
+  saveData();renderTable();closePopover();
 }
 
 function commitPopoverTask(tid,sid){
