@@ -523,8 +523,8 @@ function showPopover(e,tid,sid){
     const sRow=document.createElement('div');
     sRow.style.cssText='display:flex;align-items:center;gap:6px;padding:3px 0';
     const isActive=s.id===sid;
-    sRow.innerHTML=`<span style="font-size:12px;flex:1;color:${isActive?'#1a1a1a':'#666'};font-weight:${isActive?'500':'400'}">${s.name}</span>
-      <button class="act-btn" onclick="startEditSubject(${tid},${s.id})">Edit</button>
+    sRow.innerHTML=`<span id="subj-name-${tid}-${s.id}" style="font-size:12px;flex:1;color:${isActive?'#1a1a1a':'#666'};font-weight:${isActive?'500':'400'}">${s.name}</span>
+      <button id="subj-edit-btn-${tid}-${s.id}" class="act-btn" onclick="startEditSubject(${tid},${s.id})">Edit</button>
       <button class="act-btn del" onclick="deleteSubject(${tid},${s.id})">Del</button>`;
     subjSection.appendChild(sRow);
   });
@@ -774,27 +774,23 @@ function startEditSubject(tid,sid){
   const topic=phases[currentPhase].topics.find(x=>x.id===tid);
   const sub=topic&&topic.subjects.find(x=>x.id===sid);
   if(!sub) return;
-  const rows=document.querySelectorAll('#popover [data-sid]');
-  const allSpans=document.querySelectorAll('#popover span');
-  allSpans.forEach(sp=>{
-    if(sp.textContent===sub.name&&sp.style.flex==='1'){
-      const inp=document.createElement('input');
-      inp.style.cssText='flex:1;font-size:12px;padding:2px 6px;border-radius:4px;border:0.5px solid #ccc;background:#fff;color:#1a1a1a';
-      inp.value=sub.name;
-      const saveBtn=sp.nextElementSibling;
-      sp.replaceWith(inp);
-      if(saveBtn){
-        saveBtn.textContent='Save';
-        saveBtn.onclick=()=>{
-          sub.name=inp.value.trim()||sub.name;
-          saveData();renderTable();
-          showPopover({target:inp},tid,sid);
-        };
-      }
-      inp.onkeydown=(ev)=>{if(ev.key==='Enter'&&saveBtn) saveBtn.click();};
-      inp.focus();
-    }
-  });
+  const sp=document.getElementById(`subj-name-${tid}-${sid}`);
+  const editBtn=document.getElementById(`subj-edit-btn-${tid}-${sid}`);
+  if(!sp) return;
+  const inp=document.createElement('input');
+  inp.style.cssText='flex:1;font-size:12px;padding:2px 6px;border-radius:4px;border:0.5px solid #ccc;background:#fff;color:#1a1a1a;min-width:0';
+  inp.value=sub.name;
+  sp.replaceWith(inp);
+  if(editBtn){
+    editBtn.textContent='Save';
+    editBtn.onclick=()=>{
+      sub.name=inp.value.trim()||sub.name;
+      saveData();renderTable();
+      showPopover({target:inp},tid,sid);
+    };
+  }
+  inp.onkeydown=(ev)=>{if(ev.key==='Enter'&&editBtn) editBtn.click();if(ev.key==='Escape') showPopover({target:inp},tid,sid);};
+  inp.focus();
 }
 
 function deleteSubject(tid,sid){
