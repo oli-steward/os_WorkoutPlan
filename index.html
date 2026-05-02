@@ -131,6 +131,9 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
   <div class="topbar">
     <h1>OS Projects</h1>
     <span class="save-indicator" id="save-indicator"></span>
+    <button class="export-btn" onclick="backupData()">&#8681; Backup</button>
+    <button class="export-btn" onclick="document.getElementById('restore-input').click()">&#8679; Restore</button>
+    <input type="file" id="restore-input" accept=".json" style="display:none" onchange="restoreData(this)">
     <button class="export-btn" onclick="syncFromGSheets()">Sync Google Sheet</button>
     <button class="export-btn" id="show-all-btn" onclick="toggleShowAll()">Show all tasks</button>
     <button class="export-btn" onclick="document.getElementById('xlsx-input').click()">Import Excel</button>
@@ -756,6 +759,46 @@ function deleteSubject(tid,sid){
   topic.subjects=topic.subjects.filter(x=>x.id!==sid);
   saveData();renderTable();
   showPopover({target:document.body},tid,topic.subjects[0].id);
+}
+
+function backupData(){
+  const timestamp=new Date().toISOString().slice(0,16).replace('T','_').replace(/:/g,'-');
+  const payload={version:1,timestamp,phases:JSON.parse(JSON.stringify(phases))};
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=`os-projects-backup-${timestamp}.json`;a.click();
+  URL.revokeObjectURL(url);
+  const toast=document.getElementById('export-toast');
+  toast.textContent='Backup saved!';toast.style.opacity='1';
+  clearTimeout(toast._t);toast._t=setTimeout(()=>{toast.style.opacity='0';toast.textContent='Downloaded!';},2000);
+}
+
+function restoreData(input){
+  const file=input.files[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=(e)=>{
+    try{
+      const payload=JSON.parse(e.target.result);
+      if(!payload.phases) throw new Error('Invalid backup file');
+      const hasData=Object.keys(payload.phases).some(k=>payload.phases[k]&&payload.phases[k].topics&&payload.phases[k].topics.length>0);
+      if(!hasData) throw new Error('Backup appears empty');
+      if(!confirm(`Restore backup from ${payload.timestamp||'unknown date'}? This will overwrite all current data.`)) return;
+      phases=payload.phases;
+      saveData();
+      renderTabs();
+      renderTable();
+      renderColNumbers();
+      const toast=document.getElementById('export-toast');
+      toast.textContent='Restored!';toast.style.opacity='1';
+      clearTimeout(toast._t);toast._t=setTimeout(()=>{toast.style.opacity='0';toast.textContent='Downloaded!';},2000);
+    }catch(err){
+      alert('Restore failed: '+err.message);
+    }
+    input.value='';
+  };
+  reader.readAsText(file);
 }
 
 function setPhase(p){currentPhase=p;closePopover();renderTabs();renderTable();renderColNumbers();}
