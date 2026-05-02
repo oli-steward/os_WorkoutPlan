@@ -432,7 +432,7 @@ function renderTable(){
       wrap.id=`row-${topic.id}-${sub.id}`;
       (showAllTasks?sub.tasks:sub.tasks.filter(t=>!t.done)).slice(0,showAllTasks?undefined:3).forEach(t=>{
         const chip=document.createElement('div');
-        const pClass=t.priority==='urgent'?' urgent':t.priority==='future'?' future':'';
+        const pClass=(t.done&&showAllTasks)?' done':t.priority==='urgent'?' urgent':t.priority==='future'?' future':'';
         chip.className='task-chip'+pClass;
         chip.innerHTML=`<div class="chip-check"></div><span class="chip-label">${t.text}</span>`;
         chip.onclick=()=>toggleTask(topic.id,sub.id,t.id);
