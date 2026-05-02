@@ -614,7 +614,13 @@ function addTopic(){
   const sInp=document.getElementById('new-subj-inp');
   const name=tInp.value.trim();
   if(!name) return;
-  phases[currentPhase].topics.push({id:nextTid++,name,color:COLORS[colorIdx%COLORS.length],subjects:[{id:nextSid++,name:sInp.value.trim()||'General',goal:'',tasks:[]}]});
+  const allTopics=Object.values(phases).flatMap(p=>p.topics);
+  const maxTid=allTopics.reduce((a,t)=>Math.max(a,t.id),0);
+  const maxSid=allTopics.flatMap(t=>t.subjects).reduce((a,s)=>Math.max(a,s.id),0);
+  const newSid=maxSid+1;
+  const newTid=maxTid+1;
+  const subjName=sInp.value.trim()||'General';
+  phases[currentPhase].topics.push({id:newTid,name,color:COLORS[colorIdx%COLORS.length],subjects:[{id:newSid,name:subjName,goal:'',tasks:[]}]});
   colorIdx++;tInp.value='';sInp.value='';
   saveData();
   renderTable();
@@ -708,8 +714,9 @@ function addSubject(tid){
   if(!inp||!inp.value.trim()) return;
   const topic=phases[currentPhase].topics.find(x=>x.id===tid);
   if(!topic) return;
-  const maxId=topic.subjects.reduce((a,s)=>Math.max(a,s.id),0);
-  const newSub={id:maxId+1,name:inp.value.trim(),goal:'',tasks:[]};
+  const allTopics=Object.values(phases).flatMap(p=>p.topics);
+  const maxSid=allTopics.flatMap(t=>t.subjects).reduce((a,s)=>Math.max(a,s.id),0);
+  const newSub={id:maxSid+1,name:inp.value.trim(),goal:'',tasks:[]};
   topic.subjects.push(newSub);
   saveData();renderTable();
   showPopover({target:document.body},tid,newSub.id);
