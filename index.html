@@ -123,6 +123,13 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
 .topic-edit-row button:hover{background:#f5f5f5}
 .topic-edit-row button.del{color:#c0392b;border-color:#f5c6c6}
 .topic-edit-row button.del:hover{background:#fdf0f0}
+
+.topic-cell{cursor:grab}
+.topic-cell:active{cursor:grabbing}
+.topic-cell.dragging{opacity:0.4}
+.drag-over-top td{border-top:2px solid #378ADD!important}
+.drag-over-bottom td{border-bottom:2px solid #378ADD!important}
+.drag-handle{display:inline-block;margin-right:6px;color:#ccc;font-size:13px;cursor:grab;user-select:none}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -369,7 +376,45 @@ function renderTable(){
         topicTd.rowSpan=topic.subjects.length;
         const topicTotal=topic.subjects.flatMap(s=>s.tasks).length;
         const topicDone=topic.subjects.flatMap(s=>s.tasks).filter(t=>t.done).length;
-        topicTd.innerHTML=`<div class="topic-label"><div class="topic-dot" style="background:${topic.color}"></div><span class="topic-name">${topic.name}</span></div><div style="font-size:10px;color:#aaa;margin-top:2px;padding-left:14px">${topicDone}/${topicTotal}</div>`;
+        topicTd.innerHTML=`<div class="topic-label"><span class="drag-handle" title="Drag to reorder">&#8597;</span><div class="topic-dot" style="background:${topic.color}"></div><span class="topic-name">${topic.name}</span></div><div style="font-size:10px;color:#aaa;margin-top:2px;padding-left:14px">${topicDone}/${topicTotal}</div>`;
+        topicTd.draggable=true;
+        topicTd.dataset.tid=topic.id;
+        topicTd.addEventListener('dragstart',(e)=>{
+          e.dataTransfer.setData('tid',topic.id);
+          topicTd.classList.add('dragging');
+          e.dataTransfer.effectAllowed='move';
+        });
+        topicTd.addEventListener('dragend',()=>{
+          topicTd.classList.remove('dragging');
+          document.querySelectorAll('.drag-over-top,.drag-over-bottom').forEach(el=>el.classList.remove('drag-over-top','drag-over-bottom'));
+        });
+        topicTd.addEventListener('dragover',(e)=>{
+          e.preventDefault();
+          document.querySelectorAll('.drag-over-top,.drag-over-bottom').forEach(el=>el.classList.remove('drag-over-top','drag-over-bottom'));
+          const rect=topicTd.getBoundingClientRect();
+          const mid=rect.top+rect.height/2;
+          if(e.clientY<mid) tr.classList.add('drag-over-top');
+          else tr.classList.add('drag-over-bottom');
+          e.dataTransfer.dropEffect='move';
+        });
+        topicTd.addEventListener('drop',(e)=>{
+          e.preventDefault();
+          const fromId=parseInt(e.dataTransfer.getData('tid'));
+          const toId=topic.id;
+          if(fromId===toId) return;
+          const ph=phases[currentPhase];
+          const fromIdx=ph.topics.findIndex(t=>t.id===fromId);
+          const toIdx=ph.topics.findIndex(t=>t.id===toId);
+          const rect=topicTd.getBoundingClientRect();
+          const mid=rect.top+rect.height/2;
+          const after=e.clientY>=mid;
+          const [moved]=ph.topics.splice(fromIdx,1);
+          const newIdx=ph.topics.findIndex(t=>t.id===toId);
+          ph.topics.splice(after?newIdx+1:newIdx,0,moved);
+          saveData();
+          renderTable();
+          renderColNumbers();
+        });
         tr.appendChild(topicTd);
       }
       const subjTd=document.createElement('td');
