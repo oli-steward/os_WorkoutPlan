@@ -455,10 +455,10 @@ function showPopover(e,tid,sid){
   const pop=document.getElementById('popover');
   pop.innerHTML='';
 
-  // Topic header with edit/delete
+  // Topic header
   const topicRow=document.createElement('div');
-  topicRow.style.cssText='padding:4px 6px 6px;border-bottom:0.5px solid #eee;margin-bottom:4px';
-  topicRow.innerHTML=`<div style="font-size:11px;color:#aaa;margin-bottom:3px">Topic</div>
+  topicRow.style.cssText='padding:4px 6px 6px;border-bottom:0.5px solid #eee;margin-bottom:2px';
+  topicRow.innerHTML=`<div style="font-size:11px;color:#aaa;margin-bottom:4px">Topic</div>
     <div style="display:flex;align-items:center;gap:6px">
       <div style="width:8px;height:8px;border-radius:50%;background:${topic.color};flex-shrink:0"></div>
       <span id="topic-name-display" style="font-size:13px;font-weight:500;flex:1">${topic.name}</span>
@@ -466,6 +466,26 @@ function showPopover(e,tid,sid){
       <button class="act-btn del" onclick="deleteTopic(${tid})">Delete</button>
     </div>`;
   pop.appendChild(topicRow);
+
+  // Subjects section
+  const subjSection=document.createElement('div');
+  subjSection.style.cssText='padding:4px 6px 2px;border-bottom:0.5px solid #eee;margin-bottom:4px';
+  subjSection.innerHTML=`<div style="font-size:11px;color:#aaa;margin-bottom:4px">Subjects</div>`;
+  topic.subjects.forEach(s=>{
+    const sRow=document.createElement('div');
+    sRow.style.cssText='display:flex;align-items:center;gap:6px;padding:3px 0';
+    const isActive=s.id===sid;
+    sRow.innerHTML=`<span style="font-size:12px;flex:1;color:${isActive?'#1a1a1a':'#666'};font-weight:${isActive?'500':'400'}">${s.name}</span>
+      <button class="act-btn" onclick="startEditSubject(${tid},${s.id})">Edit</button>
+      <button class="act-btn del" onclick="deleteSubject(${tid},${s.id})">Del</button>`;
+    subjSection.appendChild(sRow);
+  });
+  const addSubjRow=document.createElement('div');
+  addSubjRow.style.cssText='display:flex;gap:5px;margin-top:4px';
+  addSubjRow.innerHTML=`<input id="new-subj-pop" style="flex:1;font-size:12px;padding:3px 7px;border-radius:4px;border:0.5px solid #ccc;background:#fff;color:#1a1a1a" placeholder="Add subject..." />
+    <button class="act-btn" onclick="addSubject(${tid})">Add</button>`;
+  subjSection.appendChild(addSubjRow);
+  pop.appendChild(subjSection);
 
   // Tasks list
   sub.tasks.forEach(t=>{
@@ -681,6 +701,54 @@ function toggleShowAll(){
   document.getElementById('show-all-btn').textContent=showAllTasks?'Show 3 columns':'Show all tasks';
   renderTable();
   renderColNumbers();
+}
+
+function addSubject(tid){
+  const inp=document.getElementById('new-subj-pop');
+  if(!inp||!inp.value.trim()) return;
+  const topic=phases[currentPhase].topics.find(x=>x.id===tid);
+  if(!topic) return;
+  const maxId=topic.subjects.reduce((a,s)=>Math.max(a,s.id),0);
+  const newSub={id:maxId+1,name:inp.value.trim(),goal:'',tasks:[]};
+  topic.subjects.push(newSub);
+  saveData();renderTable();
+  showPopover({target:document.body},tid,newSub.id);
+}
+
+function startEditSubject(tid,sid){
+  const topic=phases[currentPhase].topics.find(x=>x.id===tid);
+  const sub=topic&&topic.subjects.find(x=>x.id===sid);
+  if(!sub) return;
+  const rows=document.querySelectorAll('#popover [data-sid]');
+  const allSpans=document.querySelectorAll('#popover span');
+  allSpans.forEach(sp=>{
+    if(sp.textContent===sub.name&&sp.style.flex==='1'){
+      const inp=document.createElement('input');
+      inp.style.cssText='flex:1;font-size:12px;padding:2px 6px;border-radius:4px;border:0.5px solid #ccc;background:#fff;color:#1a1a1a';
+      inp.value=sub.name;
+      const saveBtn=sp.nextElementSibling;
+      sp.replaceWith(inp);
+      if(saveBtn){
+        saveBtn.textContent='Save';
+        saveBtn.onclick=()=>{
+          sub.name=inp.value.trim()||sub.name;
+          saveData();renderTable();
+          showPopover({target:inp},tid,sid);
+        };
+      }
+      inp.onkeydown=(ev)=>{if(ev.key==='Enter'&&saveBtn) saveBtn.click();};
+      inp.focus();
+    }
+  });
+}
+
+function deleteSubject(tid,sid){
+  const topic=phases[currentPhase].topics.find(x=>x.id===tid);
+  if(!topic||topic.subjects.length<=1){alert('A topic must have at least one subject.');return;}
+  if(!confirm('Delete this subject and all its tasks?')) return;
+  topic.subjects=topic.subjects.filter(x=>x.id!==sid);
+  saveData();renderTable();
+  showPopover({target:document.body},tid,topic.subjects[0].id);
 }
 
 function setPhase(p){currentPhase=p;closePopover();renderTabs();renderTable();renderColNumbers();}
