@@ -44,6 +44,8 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
 .task-chip.urgent{border-color:#aaa}
 .task-chip.future .chip-label{color:#E8846A}
 .task-chip.future{border-color:#F5C4B3}
+.task-chip.nextphase .chip-label{color:#7F77DD}
+.task-chip.nextphase{border-color:#C5C2F0}
 .overflow-badge{flex-shrink:0;font-size:12px;padding:3px 8px;border-radius:6px;background:#f5f5f5;color:#666;cursor:pointer;border:0.5px solid #e0e0e0;white-space:nowrap}
 .overflow-badge:hover{background:#e8e8e8}
 .goal-pill{font-size:10px;padding:2px 7px;border-radius:6px;background:#E6F1FB;color:#0C447C;white-space:nowrap;display:inline-block;margin-left:4px}
@@ -130,6 +132,12 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
 .drag-over-top td{border-top:2px solid #378ADD!important}
 .drag-over-bottom td{border-bottom:2px solid #378ADD!important}
 .drag-handle{display:inline-block;margin-right:6px;color:#ccc;font-size:13px;cursor:grab;user-select:none}
+
+.subj-concluded{text-decoration:line-through;color:#bbb}
+.subj-check-badge{width:13px;height:13px;border-radius:50%;background:#1D9E75;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;vertical-align:middle;margin-right:4px}
+.subj-check-badge::after{content:'';display:block;width:3px;height:5px;border:1.5px solid #fff;border-top:none;border-left:none;transform:rotate(45deg) translateY(-1px)}
+.act-btn.conclude{color:#1D9E75;border-color:#a8dcc8}
+.act-btn.reopen{color:#bbb;border-color:#ddd}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -422,7 +430,9 @@ function renderTable(){
       const subDone=sub.tasks.filter(t=>t.done).length;
       const subTotal=sub.tasks.length;
       const countStr=subTotal>0?` <span style="font-size:10px;color:#aaa">${subDone}/${subTotal}</span>`:'';
-      subjTd.innerHTML=sub.name+countStr+(sub.goal?`<span class="goal-pill">${sub.goal}</span>`:'');
+      const concludedBadge=sub.concluded?`<span class="subj-check-badge"></span>`:'';
+      const concludedClass=sub.concluded?' class="subj-concluded"':'';
+      subjTd.innerHTML=concludedBadge+`<span${concludedClass}>${sub.name}</span>`+countStr+(sub.goal?`<span class="goal-pill">${sub.goal}</span>`:'');
       tr.appendChild(subjTd);
 
       const tasksTd=document.createElement('td');
@@ -432,7 +442,7 @@ function renderTable(){
       wrap.id=`row-${topic.id}-${sub.id}`;
       (showAllTasks?sub.tasks:sub.tasks.filter(t=>!t.done)).slice(0,showAllTasks?undefined:3).forEach(t=>{
         const chip=document.createElement('div');
-        const pClass=(t.done&&showAllTasks)?' done':t.priority==='urgent'?' urgent':t.priority==='future'?' future':'';
+        const pClass=(t.done&&showAllTasks)?' done':t.priority==='urgent'?' urgent':t.priority==='future'?' future':t.priority==='nextphase'?' nextphase':'';
         chip.className='task-chip'+pClass;
         chip.innerHTML=`<div class="chip-check"></div><span class="chip-label">${t.text}</span>`;
         chip.onclick=()=>toggleTask(topic.id,sub.id,t.id);
@@ -523,8 +533,14 @@ function showPopover(e,tid,sid){
     const sRow=document.createElement('div');
     sRow.style.cssText='display:flex;align-items:center;gap:6px;padding:3px 0';
     const isActive=s.id===sid;
-    sRow.innerHTML=`<span id="subj-name-${tid}-${s.id}" style="font-size:12px;flex:1;color:${isActive?'#1a1a1a':'#666'};font-weight:${isActive?'500':'400'}">${s.name}</span>
+    const concludeBtn=s.concluded
+      ?`<button class="act-btn reopen" onclick="toggleConcludeSubject(${tid},${s.id})">Reopen</button>`
+      :`<button class="act-btn conclude" onclick="toggleConcludeSubject(${tid},${s.id})">Conclude</button>`;
+    const nameStyle=s.concluded?'text-decoration:line-through;color:#bbb':'';
+    sRow.innerHTML=`${s.concluded?'<span class="subj-check-badge"></span>':''}
+      <span id="subj-name-${tid}-${s.id}" style="font-size:12px;flex:1;${nameStyle}">${s.name}</span>
       <button id="subj-edit-btn-${tid}-${s.id}" class="act-btn" onclick="startEditSubject(${tid},${s.id})">Edit</button>
+      ${concludeBtn}
       <button class="act-btn del" onclick="deleteSubject(${tid},${s.id})">Del</button>`;
     subjSection.appendChild(sRow);
   });
@@ -539,10 +555,10 @@ function showPopover(e,tid,sid){
   sub.tasks.forEach(t=>{
     const row=document.createElement('div');
     row.className='popover-task';
-    const pColor=t.priority==='urgent'?'#1a1a1a':t.priority==='future'?'#E8846A':'#1a1a1a';
+    const pColor=t.priority==='urgent'?'#1a1a1a':t.priority==='future'?'#E8846A':t.priority==='nextphase'?'#7F77DD':'#1a1a1a';
     row.innerHTML=`<div style="width:14px;height:14px;border-radius:50%;border:1.5px solid #ccc;flex-shrink:0;display:flex;align-items:center;justify-content:center;${t.done?'background:#1D9E75;border-color:#1D9E75':''}"></div>
       <span style="font-size:12px;flex:1;${t.done?'text-decoration:line-through;color:#999':('color:'+pColor)}">${t.text}</span>
-      <span style="font-size:10px;color:${t.priority==='future'?'#E8846A':'#aaa'};flex-shrink:0">${t.priority==='urgent'?'now':t.priority==='future'?'later':''}</span>
+      <span style="font-size:10px;color:${t.priority==='future'?'#E8846A':t.priority==='nextphase'?'#7F77DD':'#aaa'};flex-shrink:0">${t.priority==='urgent'?'now':t.priority==='future'?'later':t.priority==='nextphase'?'next phase':''}</span>
       <div class="popover-actions">
         <button class="act-btn" onclick="startEditTask(${tid},${sid},${t.id},this)">Edit</button>
         <button class="act-btn del" onclick="deleteTask(${tid},${sid},${t.id})">Del</button>
@@ -840,6 +856,16 @@ function restoreData(input){
     input.value='';
   };
   reader.readAsText(file);
+}
+
+function toggleConcludeSubject(tid,sid){
+  const topic=phases[currentPhase].topics.find(x=>x.id===tid);
+  const sub=topic&&topic.subjects.find(x=>x.id===sid);
+  if(!sub) return;
+  sub.concluded=!sub.concluded;
+  saveData();
+  renderTable();
+  showPopover({target:document.body},tid,sid);
 }
 
 function setPhase(p){currentPhase=p;closePopover();renderTabs();renderTable();renderColNumbers();}
