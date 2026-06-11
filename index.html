@@ -155,6 +155,9 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
     <input type="file" id="xlsx-input" accept=".xlsx" style="display:none" onchange="importXlsx(this)">
     <button class="export-btn" onclick="exportNowTasks()">Export “now” tasks</button>
     <button class="export-btn" onclick="forceReset()" style="color:#c0392b;border-color:#c0392b" title="Reload all default data">Reset data</button>
+    <button class="export-btn" id="conclude-phase-btn" onclick="concludePhase()">Conclude phase →</button>
+    <button class="export-btn" id="reopen-phase-btn" onclick="reopenPhase()" style="display:none">Re-open phase</button>
+    <button class="export-btn" onclick="deletePhase()" style="color:#c0392b;border-color:#c0392b">Delete phase</button>
     <span class="export-toast" id="export-toast" style="opacity:0">Downloaded!</span>
     <div class="phase-tabs" id="phase-tabs"></div>
   </div>
@@ -335,8 +338,11 @@ function allTasks(ph){return phases[ph].topics.flatMap(t=>t.subjects.flatMap(s=>
 
 function renderTabs(){
   document.getElementById('phase-tabs').innerHTML=Object.entries(phases).map(([k,v])=>
-    `<button class="tab ${k===currentPhase?'active':''}" onclick="setPhase('${k}')">${v.label}</button>`
+    `<button class="tab ${k===currentPhase?'active':''}" onclick="setPhase('${k}')">${v.label}${v.concluded?' ✓':''}</button>`
   ).join('');
+  const concluded=!!(phases[currentPhase]&&phases[currentPhase].concluded);
+  document.getElementById('reopen-phase-btn').style.display=concluded?'':'none';
+  document.getElementById('conclude-phase-btn').style.display=concluded?'none':'';
 }
 
 function renderMetrics(){
@@ -869,6 +875,185 @@ function toggleConcludeSubject(tid,sid){
 }
 
 function setPhase(p){currentPhase=p;closePopover();renderTabs();renderTable();renderColNumbers();}
+
+// ── Re-open phase ────────────────────────────────────────────────────────────
+
+function reopenPhase(){
+  if(!phases[currentPhase].concluded) return;
+  if(!confirm(`Re-open "${phases[currentPhase].label}"? It will no longer be marked as concluded.`)) return;
+  delete phases[currentPhase].concluded;
+  saveData();
+  renderTabs();
+}
+
+// ── Delete phase ─────────────────────────────────────────────────────────────
+
+function deletePhase(){
+  const keys=Object.keys(phases);
+  if(keys.length<=1){alert('Cannot delete the only remaining phase.');return;}
+  const ph=phases[currentPhase];
+  if(!confirm(`Delete "${ph.label}" and all its topics and tasks? This cannot be undone.`)) return;
+  const idx=keys.indexOf(currentPhase);
+  delete phases[currentPhase];
+  // switch to adjacent phase: prefer previous, fall back to next
+  const remaining=Object.keys(phases);
+  currentPhase=remaining[Math.min(idx,remaining.length-1)];
+  saveData();
+  renderTabs();
+  renderTable();
+  renderColNumbers();
+}
+
+// ── Phase transition ────────────────────────────────────────────────────────
+
+/** Pure function — returns a deep-copy of phasesData with the transition applied.
+ *  Exported as window.transitionTopics so the test suite can call it directly. */
+function transitionTopics(phasesData, fromKey, toKey, selectedTopicIds){
+  const data=JSON.parse(JSON.stringify(phasesData));
+  const fromPhase=data[fromKey];
+  const toPhase=data[toKey];
+  if(!fromPhase||!toPhase) return {phases:data,error:'Invalid phase key'};
+
+  selectedTopicIds.forEach(tid=>{
+    const topic=fromPhase.topics.find(t=>t.id===tid);
+    if(!topic) return;
+
+    // find or create matching topic in destination
+    let destTopic=toPhase.topics.find(t=>t.name.toLowerCase()===topic.name.toLowerCase());
+    if(!destTopic){
+      const allTopics=Object.values(data).flatMap(p=>p.topics);
+      const maxTid=allTopics.reduce((a,t)=>Math.max(a,t.id),0);
+      destTopic={id:maxTid+1,name:topic.name,color:topic.color,subjects:[]};
+      toPhase.topics.push(destTopic);
+    }
+
+    topic.subjects.forEach(sub=>{
+      // find or create matching subject in destination topic
+      let destSub=destTopic.subjects.find(s=>s.name.toLowerCase()===sub.name.toLowerCase());
+      if(!destSub){
+        const allSubs=Object.values(data).flatMap(p=>p.topics.flatMap(t=>t.subjects));
+        const maxSid=allSubs.reduce((a,s)=>Math.max(a,s.id),0);
+        destSub={id:maxSid+1,name:sub.name,goal:sub.goal||'',tasks:[]};
+        destTopic.subjects.push(destSub);
+      }
+
+      // append only unresolved tasks; deduplicate by text (case-insensitive)
+      sub.tasks.filter(t=>!t.done).forEach(task=>{
+        const exists=destSub.tasks.some(t=>t.text.toLowerCase()===task.text.toLowerCase());
+        if(!exists){
+          const maxId=destSub.tasks.reduce((a,t)=>Math.max(a,t.id),0);
+          destSub.tasks.push({id:maxId+1,text:task.text,done:false,priority:task.priority});
+        }
+      });
+    });
+  });
+
+  fromPhase.concluded=true;
+  return {phases:data};
+}
+window.transitionTopics=transitionTopics;
+
+function getNextPhaseKey(phasesData,phaseKey){
+  const keys=Object.keys(phasesData);
+  const idx=keys.indexOf(phaseKey);
+  return (idx===-1||idx>=keys.length-1)?null:keys[idx+1];
+}
+window.getNextPhaseKey=getNextPhaseKey;
+
+function createNextPhase(){
+  const nums=Object.keys(phases).map(k=>parseInt(k.replace('PH',''))).filter(n=>!isNaN(n));
+  const next=nums.length?Math.max(...nums)+1:2;
+  const key=`PH${next}`;
+  phases[key]={label:`Phase ${next}`,topics:[]};
+  return key;
+}
+
+function concludePhase(){
+  let nextKey=getNextPhaseKey(phases,currentPhase);
+  if(!nextKey){
+    if(!confirm('No next phase exists. Create one and transition into it?')) return;
+    nextKey=createNextPhase();
+    saveData();
+    renderTabs();
+  } else if(phases[currentPhase].concluded){
+    if(!confirm('This phase is already marked concluded. Re-run the transition?')) return;
+  }
+  showTransitionModal(nextKey);
+}
+
+function showTransitionModal(nextKey){
+  const existing=document.getElementById('transition-modal');
+  if(existing) existing.remove();
+
+  const ph=phases[currentPhase];
+  const nextPh=phases[nextKey];
+
+  const overlay=document.createElement('div');
+  overlay.id='transition-modal';
+  overlay.style.cssText='position:fixed;inset:0;z-index:20;background:rgba(0,0,0,0.18);display:flex;align-items:center;justify-content:center';
+  overlay.onclick=(e)=>{if(e.target===overlay) closeTransitionModal();};
+
+  const box=document.createElement('div');
+  box.style.cssText='background:#fff;border-radius:10px;padding:16px;max-width:420px;width:90%;border:0.5px solid #ccc;box-shadow:0 4px 16px rgba(0,0,0,.08);max-height:80vh;overflow-y:auto';
+
+  const header=document.createElement('div');
+  header.innerHTML=`<div style="font-size:13px;font-weight:500;color:#1a1a1a;margin-bottom:4px">Conclude ${ph.label}</div>
+    <div style="font-size:12px;color:#888;margin-bottom:12px">Select topics to carry forward into <strong>${nextPh.label}</strong>. Only unresolved tasks will be included.</div>`;
+  box.appendChild(header);
+
+  const list=document.createElement('div');
+  list.id='transition-topic-list';
+  list.style.cssText='display:flex;flex-direction:column;gap:6px;margin-bottom:12px';
+
+  ph.topics.forEach(topic=>{
+    const unresolved=topic.subjects.flatMap(s=>s.tasks).filter(t=>!t.done).length;
+    const lbl=document.createElement('label');
+    lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;border:0.5px solid #eee';
+    lbl.innerHTML=`<input type="checkbox" data-tid="${topic.id}" style="cursor:pointer"${unresolved>0?' checked':''}>`+
+      `<div style="width:8px;height:8px;border-radius:50%;background:${topic.color};flex-shrink:0"></div>`+
+      `<span style="font-size:12px;flex:1">${topic.name}</span>`+
+      `<span style="font-size:11px;color:#aaa">${unresolved} unresolved</span>`;
+    list.appendChild(lbl);
+  });
+  box.appendChild(list);
+
+  const footer=document.createElement('div');
+  footer.style.cssText='display:flex;gap:6px;justify-content:flex-end;padding-top:8px;border-top:0.5px solid #eee';
+  footer.innerHTML=`<button class="export-btn" onclick="closeTransitionModal()">Cancel</button>`+
+    `<button class="export-btn" onclick="executeTransition('${nextKey}')">Transition selected →</button>`;
+  box.appendChild(footer);
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+
+function closeTransitionModal(){
+  const m=document.getElementById('transition-modal');
+  if(m) m.remove();
+}
+
+function executeTransition(nextKey){
+  const modal=document.getElementById('transition-modal');
+  if(!modal) return;
+
+  const selected=Array.from(modal.querySelectorAll('input[type=checkbox]:checked'))
+    .map(cb=>parseInt(cb.dataset.tid));
+
+  if(selected.length===0&&!confirm('No topics selected. Conclude this phase with no topics carried forward?')) return;
+
+  const result=transitionTopics(phases,currentPhase,nextKey,selected);
+  if(result.error){alert('Transition error: '+result.error);return;}
+  phases=result.phases;
+
+  closeTransitionModal();
+  saveData();
+  currentPhase=nextKey;
+  renderTabs();
+  renderTable();
+  renderColNumbers();
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 
 window.addEventListener('resize',()=>requestAnimationFrame(applyOverflow));
 
