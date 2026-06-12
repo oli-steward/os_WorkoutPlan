@@ -136,6 +136,10 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
 .task-chip.task-dragging{opacity:0.4}
 .task-chip.task-drop-before{box-shadow:inset 3px 0 0 #378ADD}
 .task-chip.task-drop-after{box-shadow:inset -3px 0 0 #378ADD}
+.subj-drag-handle{display:inline-block;color:#ccc;font-size:9px;cursor:grab;user-select:none;margin-right:4px;line-height:1;vertical-align:middle}
+.subj-drop-before td{border-top:2px solid #378ADD!important}
+.subj-drop-after td{border-bottom:2px solid #378ADD!important}
+.subj-row.subj-dragging .subj-cell,.subj-row.subj-dragging .tasks-cell{opacity:0.4}
 
 .subj-concluded{text-decoration:line-through;color:#bbb}
 .subj-check-badge{width:13px;height:13px;border-radius:50%;background:#1D9E75;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;vertical-align:middle;margin-right:4px}
@@ -503,6 +507,7 @@ function renderTable(){
           document.querySelectorAll('.drag-over-top,.drag-over-bottom').forEach(el=>el.classList.remove('drag-over-top','drag-over-bottom'));
         });
         topicTd.addEventListener('dragover',(e)=>{
+          if(_dragSubjectInfo) return;
           e.preventDefault();
           document.querySelectorAll('.drag-over-top,.drag-over-bottom').forEach(el=>el.classList.remove('drag-over-top','drag-over-bottom'));
           const rect=topicTd.getBoundingClientRect();
@@ -539,6 +544,46 @@ function renderTable(){
       const concludedBadge=sub.concluded?`<span class="subj-check-badge"></span>`:'';
       const concludedClass=sub.concluded?' class="subj-concluded"':'';
       subjTd.innerHTML=concludedBadge+`<span${concludedClass}>${sub.name}</span>`+countStr+(sub.goal?`<span class="goal-pill">${sub.goal}</span>`:'');
+      const subjHandle=document.createElement('span');
+      subjHandle.className='subj-drag-handle';
+      subjHandle.title='Drag to reorder';
+      subjHandle.textContent='⠿';
+      subjTd.prepend(subjHandle);
+      subjTd.draggable=true;
+      subjTd.addEventListener('dragstart',e=>{
+        _dragSubjectInfo={phaseKey:currentPhase,topicId:topic.id,fromIdx:si};
+        e.dataTransfer.effectAllowed='move';
+        tr.classList.add('subj-dragging');
+        e.stopPropagation();
+      });
+      subjTd.addEventListener('dragend',()=>{
+        _dragSubjectInfo=null;
+        tr.classList.remove('subj-dragging');
+        document.querySelectorAll('.subj-drop-before,.subj-drop-after').forEach(el=>el.classList.remove('subj-drop-before','subj-drop-after'));
+      });
+      tr.addEventListener('dragover',e=>{
+        if(!_dragSubjectInfo||_dragSubjectInfo.topicId!==topic.id) return;
+        e.preventDefault();e.stopPropagation();
+        e.dataTransfer.dropEffect='move';
+        document.querySelectorAll('.subj-drop-before,.subj-drop-after').forEach(el=>el.classList.remove('subj-drop-before','subj-drop-after'));
+        const rect=tr.getBoundingClientRect();
+        if(e.clientY<rect.top+rect.height/2) tr.classList.add('subj-drop-before');
+        else tr.classList.add('subj-drop-after');
+      });
+      tr.addEventListener('dragleave',e=>{
+        if(!e.relatedTarget||!tr.contains(e.relatedTarget)) tr.classList.remove('subj-drop-before','subj-drop-after');
+      });
+      tr.addEventListener('drop',e=>{
+        e.preventDefault();e.stopPropagation();
+        tr.classList.remove('subj-drop-before','subj-drop-after');
+        if(!_dragSubjectInfo||_dragSubjectInfo.topicId!==topic.id) return;
+        const fromIdx=_dragSubjectInfo.fromIdx;
+        if(fromIdx===si) return;
+        const rect=tr.getBoundingClientRect();
+        const after=e.clientY>=rect.top+rect.height/2;
+        phases=moveSubject(phases,currentPhase,topic.id,fromIdx,si,after);
+        saveData();renderTable();renderColNumbers();
+      });
       tr.appendChild(subjTd);
 
       const tasksTd=document.createElement('td');
@@ -1074,6 +1119,20 @@ function deletePhase(){
 
 // ── Task reorder ─────────────────────────────────────────────────────────────
 
+/** Pure — moves a subject within a topic's subjects array. Returns new phasesData. */
+function moveSubject(phasesData,phaseKey,topicId,fromIdx,toIdx,after){
+  const data=JSON.parse(JSON.stringify(phasesData));
+  const ph=data[phaseKey];if(!ph) return data;
+  const topic=ph.topics.find(t=>t.id===topicId);if(!topic) return data;
+  const subjects=topic.subjects;
+  if(fromIdx<0||fromIdx>=subjects.length||toIdx<0||toIdx>=subjects.length||fromIdx===toIdx) return data;
+  const [moved]=subjects.splice(fromIdx,1);
+  const adj=fromIdx<toIdx?toIdx-1:toIdx;
+  subjects.splice(after?adj+1:adj,0,moved);
+  return data;
+}
+window.moveSubject=moveSubject;
+
 /** Pure — moves a task within a subject's task array. Returns new phasesData. */
 function moveTask(phasesData,phaseKey,topicId,subjectId,fromIdx,toIdx,after){
   const data=JSON.parse(JSON.stringify(phasesData));
@@ -1180,6 +1239,7 @@ window.applyWizard=applyWizard;
 
 let wizardState=null;
 let _dragTaskInfo=null;
+let _dragSubjectInfo=null;
 
 function concludePhase(){
   const fromKey=currentPhase;
