@@ -138,6 +138,25 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
 .subj-check-badge::after{content:'';display:block;width:3px;height:5px;border:1.5px solid #fff;border-top:none;border-left:none;transform:rotate(45deg) translateY(-1px)}
 .act-btn.conclude{color:#1D9E75;border-color:#a8dcc8}
 .act-btn.reopen{color:#bbb;border-color:#ddd}
+
+/* ── Phase rail ───────────────────────────────────────────────────────────── */
+.phase-rail{display:flex;gap:6px;margin-bottom:1.25rem;overflow-x:auto;max-width:60%}
+.rail-item{flex:none;min-width:50px;padding:6px 7px;border:0.5px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;transition:background .1s}
+.rail-item:hover:not(.active){background:#f5f5f5}
+.rail-item.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+.rail-name{font-size:11px;font-weight:500;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rail-dates{display:flex;align-items:center;gap:3px}
+.rail-date-inp{font-size:9px;border:none;border-bottom:0.5px solid transparent;background:transparent;padding:0;cursor:pointer;width:72px;outline:none;color:#bbb}
+.rail-date-inp:hover,.rail-date-inp:focus{border-bottom-color:#ccc;color:#1a1a1a}
+.rail-item.active .rail-date-inp{color:#666;color-scheme:dark}
+.rail-item.active .rail-date-inp:hover,.rail-item.active .rail-date-inp:focus{color:#ddd;border-bottom-color:#555}
+.rail-sep{font-size:10px;color:#ccc;flex-shrink:0}
+.rail-item.active .rail-sep{color:#555}
+@media(max-width:768px){
+  .rail-item{min-width:40px;padding:1px 3px}
+  .rail-name{font-size:10px}
+  .rail-date-inp{font-size:8px;width:56px}
+}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -159,8 +178,8 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
     <button class="export-btn" id="reopen-phase-btn" onclick="reopenPhase()" style="display:none">Re-open phase</button>
     <button class="export-btn" onclick="deletePhase()" style="color:#c0392b;border-color:#c0392b">Delete phase</button>
     <span class="export-toast" id="export-toast" style="opacity:0">Downloaded!</span>
-    <div class="phase-tabs" id="phase-tabs"></div>
   </div>
+  <div class="phase-rail" id="phase-rail"></div>
   <div class="metrics" id="metrics"></div>
   <table>
     <thead>
@@ -336,13 +355,82 @@ async function loadFromSupabase(){
 
 function allTasks(ph){return phases[ph].topics.flatMap(t=>t.subjects.flatMap(s=>s.tasks))}
 
+// Returns phase keys sorted by numeric suffix (PH2 < PH3 < PH4 …)
+function getSortedPhaseKeys(phasesData){
+  return Object.keys(phasesData||phases).sort((a,b)=>{
+    const na=parseInt(a.replace(/\D/g,''))||0;
+    const nb=parseInt(b.replace(/\D/g,''))||0;
+    return na-nb;
+  });
+}
+window.getSortedPhaseKeys=getSortedPhaseKeys;
+
+// Format "YYYY-MM" → "Jan 2025"
+function fmtMonth(ym){
+  if(!ym) return '';
+  const parts=ym.split('-');
+  if(parts.length<2) return ym;
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const m=parseInt(parts[1],10);
+  return (months[m-1]||ym)+' '+parts[0];
+}
+window.fmtMonth=fmtMonth;
+
 function renderTabs(){
-  document.getElementById('phase-tabs').innerHTML=Object.entries(phases).map(([k,v])=>
-    `<button class="tab ${k===currentPhase?'active':''}" onclick="setPhase('${k}')">${v.label}${v.concluded?' ✓':''}</button>`
-  ).join('');
+  const rail=document.getElementById('phase-rail');
+  if(!rail) return;
+  rail.innerHTML='';
+
+  getSortedPhaseKeys().forEach(k=>{
+    const ph=phases[k];
+    if(!ph) return;
+    const isActive=k===currentPhase;
+
+    const item=document.createElement('div');
+    item.className='rail-item'+(isActive?' active':'');
+    item.onclick=()=>setPhase(k);
+
+    // Phase name + status
+    const nameDiv=document.createElement('div');
+    nameDiv.className='rail-name';
+    nameDiv.textContent=ph.label+(ph.concluded?' ✓':'');
+    item.appendChild(nameDiv);
+
+    // Date range (month inputs, stop propagation so they don't switch phase)
+    const datesDiv=document.createElement('div');
+    datesDiv.className='rail-dates';
+    datesDiv.onclick=(e)=>e.stopPropagation();
+
+    const startInp=document.createElement('input');
+    startInp.type='month';
+    startInp.className='rail-date-inp';
+    startInp.value=ph.startDate||'';
+    startInp.title='Start';
+    startInp.onchange=()=>{phases[k].startDate=startInp.value;saveData();};
+
+    const sep=document.createElement('span');
+    sep.className='rail-sep';
+    sep.textContent='→';
+
+    const endInp=document.createElement('input');
+    endInp.type='month';
+    endInp.className='rail-date-inp';
+    endInp.value=ph.endDate||'';
+    endInp.title='End';
+    endInp.onchange=()=>{phases[k].endDate=endInp.value;saveData();};
+
+    datesDiv.appendChild(startInp);
+    datesDiv.appendChild(sep);
+    datesDiv.appendChild(endInp);
+    item.appendChild(datesDiv);
+    rail.appendChild(item);
+  });
+
   const concluded=!!(phases[currentPhase]&&phases[currentPhase].concluded);
-  document.getElementById('reopen-phase-btn').style.display=concluded?'':'none';
-  document.getElementById('conclude-phase-btn').style.display=concluded?'none':'';
+  const reopenBtn=document.getElementById('reopen-phase-btn');
+  const concludeBtn=document.getElementById('conclude-phase-btn');
+  if(reopenBtn) reopenBtn.style.display=concluded?'':'none';
+  if(concludeBtn) concludeBtn.style.display=concluded?'none':'';
 }
 
 function renderMetrics(){
@@ -960,94 +1048,240 @@ function getNextPhaseKey(phasesData,phaseKey){
 }
 window.getNextPhaseKey=getNextPhaseKey;
 
-function createNextPhase(){
-  const nums=Object.keys(phases).map(k=>parseInt(k.replace('PH',''))).filter(n=>!isNaN(n));
-  const next=nums.length?Math.max(...nums)+1:2;
-  const key=`PH${next}`;
-  phases[key]={label:`Phase ${next}`,topics:[]};
-  return key;
+// ── Conclude wizard ──────────────────────────────────────────────────────────
+
+/** Pure — returns initial wizard state. Exported for tests. */
+function buildWizardState(fromKey, phasesData){
+  const nums=Object.keys(phasesData).map(k=>parseInt(k.replace(/\D/g,''))||0).filter(n=>n>0);
+  const nextNum=nums.length?Math.max(...nums)+1:2;
+  const topics=(phasesData[fromKey]||{topics:[]}).topics;
+  return {
+    fromKey,
+    step:1,
+    newKey:`PH${nextNum}`,
+    newLabel:`Phase ${nextNum}`,
+    newStartDate:'',
+    newEndDate:'',
+    selectedTids:topics
+      .filter(t=>t.subjects.flatMap(s=>s.tasks).some(tk=>!tk.done))
+      .map(t=>t.id)
+  };
 }
+window.buildWizardState=buildWizardState;
+
+/** Pure — creates new phase and runs transition. Exported for tests. */
+function applyWizard(state, phasesData){
+  const data=JSON.parse(JSON.stringify(phasesData));
+  data[state.newKey]={label:state.newLabel,startDate:state.newStartDate,endDate:state.newEndDate,topics:[]};
+  const result=transitionTopics(data,state.fromKey,state.newKey,state.selectedTids);
+  return result.error?{phases:data,error:result.error}:{phases:result.phases};
+}
+window.applyWizard=applyWizard;
+
+let wizardState=null;
 
 function concludePhase(){
-  let nextKey=getNextPhaseKey(phases,currentPhase);
-  if(!nextKey){
-    if(!confirm('No next phase exists. Create one and transition into it?')) return;
-    nextKey=createNextPhase();
-    saveData();
-    renderTabs();
-  } else if(phases[currentPhase].concluded){
+  const fromKey=currentPhase;
+  if(phases[fromKey].concluded){
     if(!confirm('This phase is already marked concluded. Re-run the transition?')) return;
   }
-  showTransitionModal(nextKey);
+  wizardState=buildWizardState(fromKey,phases);
+  renderWizard();
 }
 
-function showTransitionModal(nextKey){
-  const existing=document.getElementById('transition-modal');
+function renderWizard(){
+  const existing=document.getElementById('conclude-wizard');
   if(existing) existing.remove();
-
-  const ph=phases[currentPhase];
-  const nextPh=phases[nextKey];
+  if(!wizardState) return;
 
   const overlay=document.createElement('div');
-  overlay.id='transition-modal';
+  overlay.id='conclude-wizard';
   overlay.style.cssText='position:fixed;inset:0;z-index:20;background:rgba(0,0,0,0.18);display:flex;align-items:center;justify-content:center';
-  overlay.onclick=(e)=>{if(e.target===overlay) closeTransitionModal();};
 
   const box=document.createElement('div');
-  box.style.cssText='background:#fff;border-radius:10px;padding:16px;max-width:420px;width:90%;border:0.5px solid #ccc;box-shadow:0 4px 16px rgba(0,0,0,.08);max-height:80vh;overflow-y:auto';
+  box.style.cssText='background:#fff;border-radius:10px;padding:16px;max-width:440px;width:90%;border:0.5px solid #ccc;box-shadow:0 4px 16px rgba(0,0,0,.08);max-height:85vh;overflow-y:auto';
 
-  const header=document.createElement('div');
-  header.innerHTML=`<div style="font-size:13px;font-weight:500;color:#1a1a1a;margin-bottom:4px">Conclude ${ph.label}</div>
-    <div style="font-size:12px;color:#888;margin-bottom:12px">Select topics to carry forward into <strong>${nextPh.label}</strong>. Only unresolved tasks will be included.</div>`;
-  box.appendChild(header);
-
-  const list=document.createElement('div');
-  list.id='transition-topic-list';
-  list.style.cssText='display:flex;flex-direction:column;gap:6px;margin-bottom:12px';
-
-  ph.topics.forEach(topic=>{
-    const unresolved=topic.subjects.flatMap(s=>s.tasks).filter(t=>!t.done).length;
-    const lbl=document.createElement('label');
-    lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;border:0.5px solid #eee';
-    lbl.innerHTML=`<input type="checkbox" data-tid="${topic.id}" style="cursor:pointer"${unresolved>0?' checked':''}>`+
-      `<div style="width:8px;height:8px;border-radius:50%;background:${topic.color};flex-shrink:0"></div>`+
-      `<span style="font-size:12px;flex:1">${topic.name}</span>`+
-      `<span style="font-size:11px;color:#aaa">${unresolved} unresolved</span>`;
-    list.appendChild(lbl);
+  // Step indicator
+  const stepBar=document.createElement('div');
+  stepBar.style.cssText='display:flex;gap:4px;margin-bottom:12px';
+  ['New phase','Topics','Review'].forEach((lbl,i)=>{
+    const s=document.createElement('span');
+    const active=i+1===wizardState.step, past=i+1<wizardState.step;
+    s.style.cssText=`font-size:10px;padding:2px 8px;border-radius:4px;border:0.5px solid ${active?'#1a1a1a':past?'#ccc':'#eee'};background:${active?'#1a1a1a':'transparent'};color:${active?'#fff':past?'#888':'#bbb'}`;
+    s.textContent=lbl;
+    stepBar.appendChild(s);
   });
-  box.appendChild(list);
+  box.appendChild(stepBar);
 
-  const footer=document.createElement('div');
-  footer.style.cssText='display:flex;gap:6px;justify-content:flex-end;padding-top:8px;border-top:0.5px solid #eee';
-  footer.innerHTML=`<button class="export-btn" onclick="closeTransitionModal()">Cancel</button>`+
-    `<button class="export-btn" onclick="executeTransition('${nextKey}')">Transition selected →</button>`;
-  box.appendChild(footer);
+  const content=document.createElement('div');
+  if(wizardState.step===1) _wizStep1(content);
+  else if(wizardState.step===2) _wizStep2(content);
+  else _wizStep3(content);
+  box.appendChild(content);
 
   overlay.appendChild(box);
   document.body.appendChild(overlay);
 }
 
-function closeTransitionModal(){
-  const m=document.getElementById('transition-modal');
-  if(m) m.remove();
+function _wizStep1(c){
+  const ph=phases[wizardState.fromKey];
+  const title=document.createElement('div');
+  title.innerHTML=`<div style="font-size:13px;font-weight:500;margin-bottom:4px">Conclude ${ph.label}</div>`+
+    `<div style="font-size:12px;color:#888;margin-bottom:12px">Name the next phase and set its period.</div>`;
+  c.appendChild(title);
+
+  const nameWrap=document.createElement('div');
+  nameWrap.style.cssText='margin-bottom:10px';
+  nameWrap.innerHTML='<div style="font-size:11px;color:#888;margin-bottom:3px">Phase name</div>';
+  const nameInp=document.createElement('input');
+  nameInp.id='wiz-name';
+  nameInp.value=wizardState.newLabel;
+  nameInp.style.cssText='font-size:12px;padding:5px 8px;border-radius:6px;border:0.5px solid #ccc;background:#fff;color:#1a1a1a;width:100%;box-sizing:border-box';
+  nameInp.oninput=()=>{wizardState.newLabel=nameInp.value;};
+  nameWrap.appendChild(nameInp);
+  c.appendChild(nameWrap);
+
+  const dateWrap=document.createElement('div');
+  dateWrap.style.cssText='margin-bottom:16px';
+  dateWrap.innerHTML='<div style="font-size:11px;color:#888;margin-bottom:3px">Period</div>';
+  const row=document.createElement('div');
+  row.style.cssText='display:flex;align-items:center;gap:6px';
+  const mkM=(id,valKey)=>{
+    const inp=document.createElement('input');
+    inp.type='month';inp.id=id;inp.value=wizardState[valKey]||'';
+    inp.style.cssText='font-size:12px;padding:4px 6px;border-radius:6px;border:0.5px solid #ccc;background:#fff;color:#1a1a1a';
+    inp.onchange=()=>{wizardState[valKey]=inp.value;};
+    return inp;
+  };
+  const arr=document.createElement('span');
+  arr.textContent='→';arr.style.cssText='font-size:12px;color:#aaa';
+  row.appendChild(mkM('wiz-start','newStartDate'));
+  row.appendChild(arr);
+  row.appendChild(mkM('wiz-end','newEndDate'));
+  dateWrap.appendChild(row);
+  c.appendChild(dateWrap);
+  _wizFooter(c,false,_wizAdvance);
 }
 
-function executeTransition(nextKey){
-  const modal=document.getElementById('transition-modal');
-  if(!modal) return;
+function _wizStep2(c){
+  const ph=phases[wizardState.fromKey];
+  const title=document.createElement('div');
+  title.innerHTML=`<div style="font-size:13px;font-weight:500;margin-bottom:4px">Select topics</div>`+
+    `<div style="font-size:12px;color:#888;margin-bottom:12px">Choose topics to continue in <strong>${wizardState.newLabel}</strong>.</div>`;
+  c.appendChild(title);
 
-  const selected=Array.from(modal.querySelectorAll('input[type=checkbox]:checked'))
-    .map(cb=>parseInt(cb.dataset.tid));
+  const list=document.createElement('div');
+  list.style.cssText='display:flex;flex-direction:column;gap:5px;margin-bottom:16px';
+  ph.topics.forEach(topic=>{
+    const unresolved=topic.subjects.flatMap(s=>s.tasks).filter(t=>!t.done).length;
+    const checked=wizardState.selectedTids.includes(topic.id);
+    const lbl=document.createElement('label');
+    lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;border:0.5px solid #eee';
+    lbl.innerHTML=`<input type="checkbox" data-tid="${topic.id}"${checked?' checked':''}>`+
+      `<div style="width:8px;height:8px;border-radius:50%;background:${topic.color};flex-shrink:0"></div>`+
+      `<span style="font-size:12px;flex:1">${topic.name}</span>`+
+      `<span style="font-size:11px;color:#aaa">${unresolved} unresolved</span>`;
+    lbl.querySelector('input').onchange=e=>{
+      wizardState.selectedTids=e.target.checked
+        ?[...wizardState.selectedTids,topic.id]
+        :wizardState.selectedTids.filter(id=>id!==topic.id);
+    };
+    list.appendChild(lbl);
+  });
+  c.appendChild(list);
+  _wizFooter(c,true,_wizAdvance);
+}
 
-  if(selected.length===0&&!confirm('No topics selected. Conclude this phase with no topics carried forward?')) return;
+function _wizStep3(c){
+  const ph=phases[wizardState.fromKey];
+  const sel=ph.topics.filter(t=>wizardState.selectedTids.includes(t.id));
+  const title=document.createElement('div');
+  title.innerHTML=`<div style="font-size:13px;font-weight:500;margin-bottom:4px">Review</div>`+
+    `<div style="font-size:12px;color:#888;margin-bottom:12px">Confirm to conclude ${ph.label} and create the new phase.</div>`;
+  c.appendChild(title);
 
-  const result=transitionTopics(phases,currentPhase,nextKey,selected);
-  if(result.error){alert('Transition error: '+result.error);return;}
+  const phBox=document.createElement('div');
+  phBox.style.cssText='padding:8px;border:0.5px solid #eee;border-radius:6px;margin-bottom:10px';
+  const dates=(wizardState.newStartDate||wizardState.newEndDate)
+    ?`${fmtMonth(wizardState.newStartDate)||'?'} → ${fmtMonth(wizardState.newEndDate)||'?'}`:'No dates set';
+  phBox.innerHTML=`<div style="font-size:11px;color:#888;margin-bottom:2px">New phase</div>`+
+    `<div style="font-size:12px;font-weight:500">${wizardState.newLabel}</div>`+
+    `<div style="font-size:11px;color:#aaa;margin-top:2px">${dates}</div>`;
+  c.appendChild(phBox);
+
+  const topBox=document.createElement('div');
+  topBox.style.cssText='margin-bottom:16px';
+  topBox.innerHTML=`<div style="font-size:11px;color:#888;margin-bottom:5px">Topics carried forward (${sel.length})</div>`;
+  if(!sel.length){
+    const empty=document.createElement('div');
+    empty.style.cssText='font-size:12px;color:#bbb;padding:4px 0';
+    empty.textContent='None — phase will be concluded with no carry-over.';
+    topBox.appendChild(empty);
+  } else {
+    sel.forEach(topic=>{
+      const n=topic.subjects.flatMap(s=>s.tasks).filter(t=>!t.done).length;
+      const row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:7px;padding:4px 0;border-bottom:0.5px solid #f5f5f5';
+      row.innerHTML=`<div style="width:7px;height:7px;border-radius:50%;background:${topic.color};flex-shrink:0"></div>`+
+        `<span style="font-size:12px;flex:1">${topic.name}</span>`+
+        `<span style="font-size:11px;color:#aaa">${n} task${n!==1?'s':''}</span>`;
+      topBox.appendChild(row);
+    });
+  }
+  c.appendChild(topBox);
+  _wizFooter(c,true,null,true);
+}
+
+function _wizFooter(c,showBack,onNext,showConfirm){
+  const f=document.createElement('div');
+  f.style.cssText='display:flex;gap:6px;justify-content:flex-end;padding-top:8px;border-top:0.5px solid #eee';
+  const cancelBtn=document.createElement('button');
+  cancelBtn.className='export-btn';cancelBtn.textContent='Cancel';cancelBtn.onclick=closeWizard;
+  f.appendChild(cancelBtn);
+  if(showBack){
+    const b=document.createElement('button');
+    b.className='export-btn';b.textContent='← Back';
+    b.onclick=()=>{wizardState.step--;renderWizard();};
+    f.appendChild(b);
+  }
+  if(onNext){
+    const n=document.createElement('button');
+    n.className='export-btn';n.textContent='Next →';n.onclick=onNext;
+    f.appendChild(n);
+  }
+  if(showConfirm){
+    const btn=document.createElement('button');
+    btn.className='export-btn';btn.textContent='Conclude & Create →';btn.onclick=executeWizard;
+    f.appendChild(btn);
+  }
+  c.appendChild(f);
+}
+
+function _wizAdvance(){
+  if(!wizardState.newLabel.trim()){
+    const inp=document.getElementById('wiz-name');
+    if(inp) inp.focus();
+    return;
+  }
+  wizardState.step++;
+  renderWizard();
+}
+
+function closeWizard(){
+  const el=document.getElementById('conclude-wizard');
+  if(el) el.remove();
+  wizardState=null;
+}
+
+function executeWizard(){
+  if(!wizardState) return;
+  const result=applyWizard(wizardState,phases);
+  if(result.error){alert('Error: '+result.error);return;}
+  const newKey=wizardState.newKey;
   phases=result.phases;
-
-  closeTransitionModal();
+  closeWizard();
+  currentPhase=newKey;
   saveData();
-  currentPhase=nextKey;
   renderTabs();
   renderTable();
   renderColNumbers();
