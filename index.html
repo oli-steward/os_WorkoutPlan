@@ -759,9 +759,13 @@ function showPopover(e,tid,sid){
   pop.appendChild(addRow);
   pop.style.display='flex';
   document.getElementById('popover-wrap').style.display='block';
-  const rect=e.target.getBoundingClientRect();
-  pop.style.top=(rect.bottom+window.scrollY+4)+'px';
-  pop.style.left=Math.min(rect.left,window.innerWidth-290)+'px';
+  if(e.target&&e.target!==document.body&&e.target.isConnected){
+    const rect=e.target.getBoundingClientRect();
+    if(rect.width>0||rect.height>0){
+      pop.style.top=(rect.bottom+window.scrollY+4)+'px';
+      pop.style.left=Math.min(rect.left,window.innerWidth-290)+'px';
+    }
+  }
   setTimeout(()=>{const i=document.getElementById('pop-inp');if(i)i.focus();},50);
 }
 
