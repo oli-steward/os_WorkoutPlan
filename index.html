@@ -132,6 +132,10 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
 .drag-over-top td{border-top:2px solid #378ADD!important}
 .drag-over-bottom td{border-bottom:2px solid #378ADD!important}
 .drag-handle{display:inline-block;margin-right:6px;color:#ccc;font-size:13px;cursor:grab;user-select:none}
+.task-drag-handle{display:inline-block;color:#ccc;font-size:9px;cursor:grab;user-select:none;margin-right:3px;flex-shrink:0;line-height:1}
+.task-chip.task-dragging{opacity:0.4}
+.task-chip.task-drop-before{box-shadow:inset 3px 0 0 #378ADD}
+.task-chip.task-drop-after{box-shadow:inset -3px 0 0 #378ADD}
 
 .subj-concluded{text-decoration:line-through;color:#bbb}
 .subj-check-badge{width:13px;height:13px;border-radius:50%;background:#1D9E75;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;vertical-align:middle;margin-right:4px}
@@ -170,6 +174,7 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
     <input type="file" id="restore-input" accept=".json" style="display:none" onchange="restoreData(this)">
     <button class="export-btn" onclick="syncFromGSheets()">Sync Google Sheet</button>
     <button class="export-btn" id="show-all-btn" onclick="toggleShowAll()">Show all tasks</button>
+    <button class="export-btn" id="show-archived-btn" onclick="toggleShowArchived()" style="display:none">Show archived (0)</button>
     <button class="export-btn" onclick="document.getElementById('xlsx-input').click()">Import Excel</button>
     <input type="file" id="xlsx-input" accept=".xlsx" style="display:none" onchange="importXlsx(this)">
     <button class="export-btn" onclick="exportNowTasks()">Export “now” tasks</button>
@@ -448,7 +453,14 @@ function renderTable(){
   const tbody=document.getElementById('tbody');
   tbody.innerHTML='';
   const ph=phases[currentPhase];
-  ph.topics.forEach((topic,ti)=>{
+  const archivedCount=ph.topics.filter(t=>t.archived).length;
+  const archBtn=document.getElementById('show-archived-btn');
+  if(archBtn){
+    if(archivedCount>0){archBtn.style.display='';archBtn.textContent=(showArchived?'Hide archived':'Show archived')+` (${archivedCount})`;}
+    else{archBtn.style.display='none';showArchived=false;}
+  }
+  const visibleTopics=showArchived?ph.topics:ph.topics.filter(t=>!t.archived);
+  visibleTopics.forEach((topic,ti)=>{
     topic.subjects.forEach((sub,si)=>{
       const isFirst=si===0;
       const isLast=si===topic.subjects.length-1;
@@ -538,10 +550,43 @@ function renderTable(){
         const chip=document.createElement('div');
         const pClass=(t.done&&showAllTasks)?' done':t.priority==='urgent'?' urgent':t.priority==='future'?' future':t.priority==='nextphase'?' nextphase':'';
         chip.className='task-chip'+pClass;
-        chip.innerHTML=`<div class="chip-check"></div><span class="chip-label">${t.text}</span>`;
-        chip.onclick=()=>toggleTask(topic.id,sub.id,t.id);
+        chip.innerHTML=`<span class="task-drag-handle" title="Drag to reorder">⠿</span><div class="chip-check"></div><span class="chip-label">${t.text}</span>`;
+        chip.onclick=(e)=>{if(e.target.closest('.task-drag-handle')) return; toggleTask(topic.id,sub.id,t.id);};
         chip.oncontextmenu=(e)=>{e.preventDefault();cyclePriority(topic.id,sub.id,t.id);};
         chip.title='Right-click to set priority';
+        const realIdx=sub.tasks.findIndex(tk=>tk.id===t.id);
+        chip.draggable=true;
+        chip.addEventListener('dragstart',e=>{
+          _dragTaskInfo={phaseKey:currentPhase,topicId:topic.id,subjectId:sub.id,taskIdx:realIdx};
+          e.dataTransfer.effectAllowed='move';
+          chip.classList.add('task-dragging');
+        });
+        chip.addEventListener('dragend',()=>{
+          _dragTaskInfo=null;
+          chip.classList.remove('task-dragging');
+          document.querySelectorAll('.task-drop-before,.task-drop-after').forEach(el=>el.classList.remove('task-drop-before','task-drop-after'));
+        });
+        chip.addEventListener('dragover',e=>{
+          if(!_dragTaskInfo||_dragTaskInfo.topicId!==topic.id||_dragTaskInfo.subjectId!==sub.id) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect='move';
+          document.querySelectorAll('.task-drop-before,.task-drop-after').forEach(el=>el.classList.remove('task-drop-before','task-drop-after'));
+          const rect=chip.getBoundingClientRect();
+          if(e.clientX<rect.left+rect.width/2) chip.classList.add('task-drop-before');
+          else chip.classList.add('task-drop-after');
+        });
+        chip.addEventListener('dragleave',()=>{chip.classList.remove('task-drop-before','task-drop-after');});
+        chip.addEventListener('drop',e=>{
+          e.preventDefault();
+          chip.classList.remove('task-drop-before','task-drop-after');
+          if(!_dragTaskInfo||_dragTaskInfo.topicId!==topic.id||_dragTaskInfo.subjectId!==sub.id) return;
+          const fromIdx=_dragTaskInfo.taskIdx;
+          if(fromIdx===realIdx) return;
+          const rect=chip.getBoundingClientRect();
+          const after=e.clientX>=rect.left+rect.width/2;
+          phases=moveTask(phases,currentPhase,topic.id,sub.id,fromIdx,realIdx,after);
+          saveData();renderTable();renderColNumbers();
+        });
         wrap.appendChild(chip);
       });
       const addBtn=document.createElement('div');
@@ -553,7 +598,7 @@ function renderTable(){
       tr.appendChild(tasksTd);
       tbody.appendChild(tr);
 
-      if(isLast&&ti<ph.topics.length-1){
+      if(isLast&&ti<visibleTopics.length-1){
         const sep=document.createElement('tr');
         sep.className='sep-row';
         sep.innerHTML='<td colspan="3"></td>';
@@ -615,6 +660,7 @@ function showPopover(e,tid,sid){
       <div style="width:8px;height:8px;border-radius:50%;background:${topic.color};flex-shrink:0"></div>
       <span id="topic-name-display" style="font-size:13px;font-weight:500;flex:1">${topic.name}</span>
       <button class="act-btn" onclick="startEditTopic(${tid},${sid})">Edit</button>
+      <button class="act-btn" onclick="toggleArchiveTopic(${tid})">${topic.archived?'Unarchive':'Archive'}</button>
       <button class="act-btn del" onclick="deleteTopic(${tid})">Delete</button>
     </div>`;
   pop.appendChild(topicRow);
@@ -726,6 +772,33 @@ function deleteTopic(tid){
   if(!confirm('Delete this topic and all its tasks?')) return;
   phases[currentPhase].topics=phases[currentPhase].topics.filter(x=>x.id!==tid);
   saveData();renderTable();closePopover();
+}
+
+/** Pure — sets topic.archived=true. */
+function archiveTopic(phasesData,phaseKey,topicId){
+  const data=JSON.parse(JSON.stringify(phasesData));
+  const ph=data[phaseKey];if(!ph) return data;
+  const topic=ph.topics.find(t=>t.id===topicId);if(!topic) return data;
+  topic.archived=true;
+  return data;
+}
+window.archiveTopic=archiveTopic;
+
+/** Pure — removes topic.archived flag. */
+function unarchiveTopic(phasesData,phaseKey,topicId){
+  const data=JSON.parse(JSON.stringify(phasesData));
+  const ph=data[phaseKey];if(!ph) return data;
+  const topic=ph.topics.find(t=>t.id===topicId);if(!topic) return data;
+  delete topic.archived;
+  return data;
+}
+window.unarchiveTopic=unarchiveTopic;
+
+function toggleArchiveTopic(tid){
+  const topic=phases[currentPhase].topics.find(t=>t.id===tid);
+  if(!topic) return;
+  phases=topic.archived?unarchiveTopic(phases,currentPhase,tid):archiveTopic(phases,currentPhase,tid);
+  saveData();renderTable();renderColNumbers();closePopover();
 }
 
 function commitPopoverTask(tid,sid){
@@ -859,10 +932,17 @@ function renderColNumbers(){
 }
 
 let showAllTasks=false;
+let showArchived=false;
 
 function toggleShowAll(){
   showAllTasks=!showAllTasks;
   document.getElementById('show-all-btn').textContent=showAllTasks?'Show 3 columns':'Show all tasks';
+  renderTable();
+  renderColNumbers();
+}
+
+function toggleShowArchived(){
+  showArchived=!showArchived;
   renderTable();
   renderColNumbers();
 }
@@ -992,6 +1072,26 @@ function deletePhase(){
   renderColNumbers();
 }
 
+// ── Task reorder ─────────────────────────────────────────────────────────────
+
+/** Pure — moves a task within a subject's task array. Returns new phasesData. */
+function moveTask(phasesData,phaseKey,topicId,subjectId,fromIdx,toIdx,after){
+  const data=JSON.parse(JSON.stringify(phasesData));
+  const ph=data[phaseKey];
+  if(!ph) return data;
+  const topic=ph.topics.find(t=>t.id===topicId);
+  if(!topic) return data;
+  const sub=topic.subjects.find(s=>s.id===subjectId);
+  if(!sub) return data;
+  const tasks=sub.tasks;
+  if(fromIdx<0||fromIdx>=tasks.length||toIdx<0||toIdx>=tasks.length||fromIdx===toIdx) return data;
+  const [moved]=tasks.splice(fromIdx,1);
+  const adj=fromIdx<toIdx?toIdx-1:toIdx;
+  tasks.splice(after?adj+1:adj,0,moved);
+  return data;
+}
+window.moveTask=moveTask;
+
 // ── Phase transition ────────────────────────────────────────────────────────
 
 /** Pure function — returns a deep-copy of phasesData with the transition applied.
@@ -1079,6 +1179,7 @@ function applyWizard(state, phasesData){
 window.applyWizard=applyWizard;
 
 let wizardState=null;
+let _dragTaskInfo=null;
 
 function concludePhase(){
   const fromKey=currentPhase;
@@ -1179,7 +1280,7 @@ function _wizStep2(c){
     lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;border:0.5px solid #eee';
     lbl.innerHTML=`<input type="checkbox" data-tid="${topic.id}"${checked?' checked':''}>`+
       `<div style="width:8px;height:8px;border-radius:50%;background:${topic.color};flex-shrink:0"></div>`+
-      `<span style="font-size:12px;flex:1">${topic.name}</span>`+
+      `<span style="font-size:12px;flex:1">${topic.name}${topic.archived?' <span style="font-size:10px;color:#aaa">(archived)</span>':''}</span>`+
       `<span style="font-size:11px;color:#aaa">${unresolved} unresolved</span>`;
     lbl.querySelector('input').onchange=e=>{
       wizardState.selectedTids=e.target.checked
