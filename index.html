@@ -140,6 +140,13 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
 .subj-drop-before td{border-top:2px solid #378ADD!important}
 .subj-drop-after td{border-bottom:2px solid #378ADD!important}
 .subj-row.subj-dragging .subj-cell,.subj-row.subj-dragging .tasks-cell{opacity:0.4}
+#focus-view{display:none;flex-direction:column;max-width:520px}
+.focus-item{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:0.5px solid #eee;cursor:default}
+.focus-drag-handle{color:#ccc;font-size:10px;cursor:grab;user-select:none;flex-shrink:0;line-height:1}
+.focus-item.focus-dragging{opacity:0.4}
+.focus-item.focus-drop-before{border-top:2px solid #378ADD;border-bottom:none}
+.focus-item.focus-drop-after{border-bottom:2px solid #378ADD}
+.focus-item.focus-item-urgent{background:rgba(224,58,58,0.07);border-radius:6px;padding-left:6px;padding-right:6px}.focus-item.focus-item-urgent .focus-task-text{font-weight:500}
 
 .subj-concluded{text-decoration:line-through;color:#bbb}
 .subj-check-badge{width:13px;height:13px;border-radius:50%;background:#1D9E75;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;vertical-align:middle;margin-right:4px}
@@ -182,6 +189,7 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
     <button class="export-btn" onclick="document.getElementById('xlsx-input').click()">Import Excel</button>
     <input type="file" id="xlsx-input" accept=".xlsx" style="display:none" onchange="importXlsx(this)">
     <button class="export-btn" onclick="exportNowTasks()">Export “now” tasks</button>
+    <button class="export-btn" id="focus-btn" onclick="toggleFocusMode()">Focus</button>
     <button class="export-btn" onclick="forceReset()" style="color:#c0392b;border-color:#c0392b" title="Reload all default data">Reset data</button>
     <button class="export-btn" id="conclude-phase-btn" onclick="concludePhase()">Conclude phase →</button>
     <button class="export-btn" id="reopen-phase-btn" onclick="reopenPhase()" style="display:none">Re-open phase</button>
@@ -202,6 +210,7 @@ thead th{font-size:11px;font-weight:500;color:#888;text-transform:uppercase;lett
     </thead>
     <tbody id="tbody"></tbody>
   </table>
+  <div id="focus-view"></div>
   <div class="add-topic-row">
     <input id="new-topic-inp" placeholder="New topic..." />
     <input id="new-subj-inp" placeholder="Subject..." />
@@ -653,6 +662,7 @@ function renderTable(){
   });
   requestAnimationFrame(applyOverflow);
   renderMetrics();
+  if(focusMode) renderFocusView();
 }
 
 function applyOverflow(){
@@ -982,6 +992,8 @@ function renderColNumbers(){
 
 let showAllTasks=false;
 let showArchived=false;
+let focusMode=false;
+let _focusDragIdx=null;
 
 function toggleShowAll(){
   showAllTasks=!showAllTasks;
@@ -994,6 +1006,115 @@ function toggleShowArchived(){
   showArchived=!showArchived;
   renderTable();
   renderColNumbers();
+}
+
+function toggleFocusMode(){
+  focusMode=!focusMode;
+  const btn=document.getElementById('focus-btn');
+  if(btn) btn.textContent=focusMode?'Exit focus':'Focus';
+  const tbl=document.querySelector('table');
+  const atr=document.querySelector('.add-topic-row');
+  const fv=document.getElementById('focus-view');
+  if(tbl) tbl.style.display=focusMode?'none':'';
+  if(atr) atr.style.display=focusMode?'none':'';
+  if(fv) fv.style.display=focusMode?'flex':'none';
+  if(focusMode) renderFocusView();
+}
+
+function setTaskPriority(tid,sid,taskId,priority){
+  const topic=phases[currentPhase].topics.find(t=>t.id===tid);
+  const sub=topic&&topic.subjects.find(s=>s.id===sid);
+  const task=sub&&sub.tasks.find(t=>t.id===taskId);
+  if(!task) return;
+  task.priority=priority;
+  saveData();
+  renderTable();
+}
+
+function renderFocusView(){
+  const container=document.getElementById('focus-view');
+  if(!container||!focusMode) return;
+  container.innerHTML='';
+  const tasks=getFocusTasks(phases,currentPhase);
+  if(!tasks.length){
+    const empty=document.createElement('div');
+    empty.style.cssText='font-size:13px;color:#aaa;padding:2rem 0;text-align:center;width:100%';
+    empty.textContent='No urgent tasks in this phase.';
+    container.appendChild(empty);
+    return;
+  }
+  tasks.forEach((task,idx)=>{
+    const item=document.createElement('div');
+    item.className='focus-item'+(task.focusUrgent?' focus-item-urgent':'');
+
+    const handle=document.createElement('span');
+    handle.className='focus-drag-handle';
+    handle.textContent='⠿';
+    handle.title='Drag to reorder';
+    item.appendChild(handle);
+
+    const check=document.createElement('div');
+    check.className='chip-check';
+    check.style.flexShrink='0';
+    check.onclick=()=>{toggleTask(task.topicId,task.subjectId,task.taskId);};
+    item.appendChild(check);
+
+    const content=document.createElement('div');
+    content.style.cssText='flex:1;min-width:0';
+    const textDiv=document.createElement('div');
+    textDiv.className='focus-task-text';
+    textDiv.style.cssText='font-size:13px;color:#1a1a1a;line-height:1.3;word-break:break-word';
+    textDiv.textContent=task.text;
+    const metaDiv=document.createElement('div');
+    metaDiv.style.cssText='display:flex;align-items:center;gap:4px;margin-top:2px';
+    metaDiv.innerHTML=`<div style="width:6px;height:6px;border-radius:50%;background:${task.topicColor};flex-shrink:0"></div><span style="font-size:11px;color:#aaa">${task.topicName} · ${task.subjectName}</span>`;
+    content.appendChild(textDiv);
+    content.appendChild(metaDiv);
+    item.appendChild(content);
+
+    const urgentBtn=document.createElement('span');
+    urgentBtn.style.cssText=`font-size:11px;cursor:pointer;flex-shrink:0;padding:2px 6px;border:0.5px solid ${task.focusUrgent?'#1a1a1a':'#ddd'};border-radius:4px;white-space:nowrap;color:${task.focusUrgent?'#1a1a1a':'#bbb'};font-weight:${task.focusUrgent?'500':'400'}`;
+    urgentBtn.textContent=task.focusUrgent?'urgent ×':'urgent';
+    urgentBtn.title=task.focusUrgent?'Remove urgent':'Mark as urgent';
+    urgentBtn.onclick=()=>{phases=toggleFocusUrgent(phases,currentPhase,task.topicId,task.subjectId,task.taskId);saveData();renderFocusView();};
+    item.appendChild(urgentBtn);
+
+    item.draggable=true;
+    item.addEventListener('dragstart',e=>{
+      _focusDragIdx=idx;
+      e.dataTransfer.effectAllowed='move';
+      item.classList.add('focus-dragging');
+    });
+    item.addEventListener('dragend',()=>{
+      _focusDragIdx=null;
+      item.classList.remove('focus-dragging');
+      document.querySelectorAll('.focus-drop-before,.focus-drop-after').forEach(el=>el.classList.remove('focus-drop-before','focus-drop-after'));
+    });
+    item.addEventListener('dragover',e=>{
+      if(_focusDragIdx===null) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect='move';
+      document.querySelectorAll('.focus-drop-before,.focus-drop-after').forEach(el=>el.classList.remove('focus-drop-before','focus-drop-after'));
+      const rect=item.getBoundingClientRect();
+      if(e.clientY<rect.top+rect.height/2) item.classList.add('focus-drop-before');
+      else item.classList.add('focus-drop-after');
+    });
+    item.addEventListener('dragleave',e=>{
+      if(!e.relatedTarget||!item.contains(e.relatedTarget)) item.classList.remove('focus-drop-before','focus-drop-after');
+    });
+    item.addEventListener('drop',e=>{
+      e.preventDefault();
+      item.classList.remove('focus-drop-before','focus-drop-after');
+      if(_focusDragIdx===null||_focusDragIdx===idx) return;
+      const rect=item.getBoundingClientRect();
+      const after=e.clientY>=rect.top+rect.height/2;
+      phases=reorderFocus(phases,currentPhase,_focusDragIdx,idx,after);
+      saveData();
+      renderFocusView();
+    });
+
+    container.appendChild(item);
+  });
 }
 
 function addSubject(tid){
@@ -1120,6 +1241,68 @@ function deletePhase(){
   renderTable();
   renderColNumbers();
 }
+
+// ── Focus view ───────────────────────────────────────────────────────────────
+
+/** Pure — returns ordered list of urgent non-done tasks for the focus view. */
+function getFocusTasks(phasesData, phaseKey){
+  const ph=phasesData[phaseKey];
+  if(!ph) return [];
+  const all=[];
+  (ph.topics||[]).filter(t=>!t.archived).forEach(topic=>{
+    (topic.subjects||[]).forEach(sub=>{
+      (sub.tasks||[]).forEach(task=>{
+        if(!task.done&&task.priority==='urgent')
+          all.push({topicId:topic.id,subjectId:sub.id,taskId:task.id,
+            text:task.text,topicName:topic.name,topicColor:topic.color,subjectName:sub.name,
+            focusUrgent:!!task.focusUrgent});
+      });
+    });
+  });
+  const order=ph.focusOrder||[];
+  const seen=new Set();
+  const result=[];
+  order.forEach(ref=>{
+    const key=`${ref.topicId}-${ref.subjectId}-${ref.taskId}`;
+    const found=all.find(t=>t.topicId===ref.topicId&&t.subjectId===ref.subjectId&&t.taskId===ref.taskId);
+    if(found&&!seen.has(key)){result.push(found);seen.add(key);}
+  });
+  all.forEach(t=>{
+    const key=`${t.topicId}-${t.subjectId}-${t.taskId}`;
+    if(!seen.has(key)) result.push(t);
+  });
+  return result;
+}
+window.getFocusTasks=getFocusTasks;
+
+/** Pure — reorders the focus list, updating phase.focusOrder. */
+function reorderFocus(phasesData, phaseKey, fromIdx, toIdx, after){
+  const data=JSON.parse(JSON.stringify(phasesData));
+  const ph=data[phaseKey];
+  if(!ph) return data;
+  const tasks=getFocusTasks(phasesData,phaseKey);
+  if(fromIdx<0||fromIdx>=tasks.length||toIdx<0||toIdx>=tasks.length||fromIdx===toIdx) return data;
+  const refs=tasks.map(t=>({topicId:t.topicId,subjectId:t.subjectId,taskId:t.taskId}));
+  const [moved]=refs.splice(fromIdx,1);
+  const adj=fromIdx<toIdx?toIdx-1:toIdx;
+  refs.splice(after?adj+1:adj,0,moved);
+  ph.focusOrder=refs;
+  return data;
+}
+window.reorderFocus=reorderFocus;
+
+/** Pure — toggles the focusUrgent flag on a task. Does not touch priority. */
+function toggleFocusUrgent(phasesData,phaseKey,topicId,subjectId,taskId){
+  const data=JSON.parse(JSON.stringify(phasesData));
+  const ph=data[phaseKey];if(!ph) return data;
+  const topic=ph.topics.find(t=>t.id===topicId);if(!topic) return data;
+  const sub=topic.subjects.find(s=>s.id===subjectId);if(!sub) return data;
+  const task=sub.tasks.find(t=>t.id===taskId);if(!task) return data;
+  if(task.focusUrgent) delete task.focusUrgent;
+  else task.focusUrgent=true;
+  return data;
+}
+window.toggleFocusUrgent=toggleFocusUrgent;
 
 // ── Task reorder ─────────────────────────────────────────────────────────────
 
